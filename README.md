@@ -13,6 +13,24 @@ to any tablet browser on the boat's Wi-Fi.
 
 The Pi only listens. It never transmits on the bus.
 
+## Screenshots
+
+These show the built-in simulator sailing in Casco Bay, Maine. The AIS vessels marked "(SIM)" are made up.
+
+![2D view: heading-up compass rose with apparent and true wind arrows, close-hauled zones, true wind direction markers and course over ground, next to the wind, speed and course tiles, the heel gauge and the 20-minute wind chart](docs/images/potter19-2026-11-01-120832.jpg)
+
+*2D view.* The compass rose turns with the heading. It shows apparent (A) and true (T) wind
+arrows, plus markers for the true wind direction, its 10-minute average and course over ground.
+The tiles, heel gauge and wind chart are on the right.
+
+| Satellite map | NOAA chart |
+|---|---|
+| ![3D view over offline satellite imagery, with AIS targets, their predicted tracks and a closest-approach warning](docs/images/potter19-2026-11-01-120906.jpg) | ![The same 3D view over the offline NOAA chart layer](docs/images/potter19-2026-11-01-120913.jpg) |
+
+*3D view.* The boat is drawn over offline satellite imagery or the NOAA chart, with 3D wind arrows
+and a compass ring. Each AIS target has a label and a predicted track. The ferry is flagged red
+because it will pass within 0.13 nm in a minute.
+
 ## Wiring
 
 ### PiCAN3 HAT (Raspberry Pi 4)
