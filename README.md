@@ -32,6 +32,13 @@ The tiles, heel gauge and wind chart are on the right.
 and a compass ring. Each AIS target has a label and a predicted track. The ferry is flagged red
 because it will pass within 0.13 nm in a minute.
 
+![Close-up 3D view of the Potter 19 heeled 10° to starboard on port tack, sails trimmed for the wind, with the apparent and true wind arrows, the compass ring and the heel gauge](docs/images/potter19-2026-11-01-142541.jpg)
+
+*3D close-up.* The model heels, pitches and turns with the sensors, and the sails are trimmed
+to the apparent wind. Here the Potter is close-hauled on port tack, heeled 10° to starboard.
+It has its own paint: blue hull with a white pinstripe, black bottom paint, "974" on the main
+and a striped jib.
+
 ## Wiring
 
 ### PiCAN3 HAT (Raspberry Pi 4)
