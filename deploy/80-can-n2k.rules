@@ -1,0 +1,3 @@
+# Bring up any SocketCAN adapter (e.g. SH-C30A with candleLight firmware) at the
+# NMEA 2000 bitrate as soon as it is plugged in. restart-ms recovers from bus-off.
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="can*", RUN+="/usr/sbin/ip link set $name type can bitrate 250000 restart-ms 100", RUN+="/usr/sbin/ip link set $name up"

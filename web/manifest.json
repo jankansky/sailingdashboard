@@ -1,0 +1,10 @@
+{
+  "name": "Potter 19 Dashboard",
+  "short_name": "Potter 19",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#070d17",
+  "theme_color": "#070d17",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Potter 19 sailing dashboard (NMEA 2000 -> tablet web UI)
+After=network.target
+
+[Service]
+EnvironmentFile=-/etc/default/sailingdashboard
+ExecStart=/opt/sailingdashboard/sailingdashboard --web /opt/sailingdashboard/web --tiles /opt/sailingdashboard/tiles $DASH_ARGS
+DynamicUser=yes
+SupplementaryGroups=dialout
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

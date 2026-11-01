@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en" data-theme="day">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>Potter 19</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">Potter 19</div>
+  <div class="pills">
+    <span class="pill" id="pill-link">LINK</span>
+    <span class="pill" id="pill-wind">WIND</span>
+    <span class="pill" id="pill-hdg">HDG</span>
+    <span class="pill" id="pill-gps">GPS</span>
+    <span class="pill" id="pill-att">HEEL</span>
+  </div>
+  <div class="clock" id="clock">--:--:--</div>
+  <div class="buttons">
+    <button id="btn-bus" type="button">Bus</button>
+    <button id="btn-damp" type="button">Damp 1s</button>
+    <button id="btn-theme" type="button">Day</button>
+  </div>
+</header>
+
+<div id="error-banner" class="error-banner hidden" role="alert">
+  <span></span>
+  <button id="error-close" type="button" aria-label="Dismiss">✕</button>
+</div>
+
+<main>
+  <section class="panel rose-panel">
+    <div class="corner tl">
+      <div class="corner-label">HDG</div>
+      <div class="corner-value" id="hdg">---°</div>
+      <div class="corner-sub" id="hdg-sub">&nbsp;</div>
+    </div>
+    <div class="corner tr">
+      <div class="corner-sub" id="pos-lat">&nbsp;</div>
+      <div class="corner-sub" id="pos-lon">&nbsp;</div>
+      <div class="corner-sub" id="pos-sats">&nbsp;</div>
+    </div>
+    <div class="corner bl legend">
+      <span><i class="sw aw"></i>Apparent</span>
+      <span><i class="sw tw"></i>True</span>
+      <span><i class="sw cog"></i>COG</span>
+    </div>
+    <div class="corner br">
+      <div class="corner-sub" id="rot">&nbsp;</div>
+    </div>
+    <div class="view-toggle">
+      <button id="btn-2d" type="button" class="active">2D</button>
+      <button id="btn-3d" type="button">3D</button>
+      <button id="btn-follow" type="button" class="hidden">Follow</button>
+      <button id="btn-map" type="button" class="hidden">Map: Off</button>
+    </div>
+    <div id="map-credit" class="map-credit hidden"></div>
+    <div id="boat3d" class="boat3d hidden"></div>
+
+    <svg id="rose" viewBox="-500 -500 1000 1000" preserveAspectRatio="xMidYMid meet" aria-label="Boat and wind">
+      <!-- Compass card: rotates so the boat's heading is up -->
+      <!-- Rings, outside in: markers 472-498 | compass card 398-468 (ticks 446-468,
+           labels ~400-440) | relative ring 380-392 (ticks 374-386, labels ~342-366) |
+           wind arrows 300-372 | boat -->
+      <g id="compass">
+        <circle r="468" class="card-band"/>
+        <g id="compass-ticks"></g>
+        <g id="compass-labels"></g>
+        <g id="twd-avg" class="twd-avg-mark"><path d="M0,-474 L-12,-496 L12,-496 Z"/></g>
+        <g id="twd-mark" class="tw-fill"><path d="M0,-472 L-16,-498 L16,-498 Z"/></g>
+        <g id="cog-mark" class="cog-mark">
+          <line y1="-300" y2="-370"/>
+          <path d="M0,-472 L-10,-485 L0,-498 L10,-485 Z"/>
+        </g>
+      </g>
+
+      <!-- Boat-relative scale -->
+      <g id="relative">
+        <circle r="386" class="rel-ring"/>
+        <path id="sector-port" class="sector port"/>
+        <path id="sector-stbd" class="sector stbd"/>
+        <g id="rel-ticks"></g>
+        <path d="M0,-470 L-13,-498 L13,-498 Z" class="lubber"/>
+      </g>
+
+      <!-- West Wight Potter 19, plan view (1 unit = 1 cm, LOA 5.72 m, beam 2.29 m) -->
+      <g id="boat" transform="scale(0.93)">
+        <path id="hull" class="hull"
+              d="M0,-286 C38,-252 104,-160 112,-30 C117,70 110,190 98,282 L-98,282 C-110,190 -117,70 -112,-30 C-104,-160 -38,-252 0,-286 Z"/>
+        <use href="#hull" class="deck-edge" transform="translate(0,6) scale(0.9,0.95)"/>
+        <!-- kick-up rudder and outboard on its transom bracket -->
+        <rect x="-5" y="282" width="10" height="46" rx="3" class="fitting"/>
+        <rect x="-72" y="288" width="36" height="40" rx="7" class="outboard"/>
+        <line x1="0" y1="290" x2="0" y2="150" class="tiller"/>
+        <!-- cabin trunk, pop-top and forward hatch -->
+        <path class="cabin" d="M-46,-180 C-28,-198 28,-198 46,-180 L70,40 L-70,40 Z"/>
+        <rect class="hatch" x="-48" y="-62" width="96" height="94" rx="8"/>
+        <rect class="hatch" x="-26" y="-160" width="52" height="40" rx="6"/>
+        <!-- cockpit with benches -->
+        <rect class="cockpit" x="-78" y="52" width="156" height="210" rx="14"/>
+        <line class="bench" x1="-46" y1="60" x2="-46" y2="254"/>
+        <line class="bench" x1="46" y1="60" x2="46" y2="254"/>
+        <!-- bow pulpit, rigging -->
+        <path class="pulpit" d="M-34,-236 Q0,-290 34,-236"/>
+        <line class="rigging" x1="0" y1="-282" x2="0" y2="-130"/>
+        <line class="rigging" x1="-106" y1="-118" x2="0" y2="-130"/>
+        <line class="rigging" x1="106" y1="-118" x2="0" y2="-130"/>
+        <!-- sails: angles set from apparent wind -->
+        <g id="jib" transform="translate(0,-282)">
+          <path id="jib-sail" class="sail" d="M0,0 Q-20,95 0,190 Z"/>
+        </g>
+        <g id="main" transform="translate(0,-130)">
+          <path id="main-sail" class="sail" d="M0,0 Q-30,135 0,268 Z"/>
+          <line class="boom" x1="0" y1="0" x2="0" y2="268"/>
+        </g>
+        <circle class="mast" cx="0" cy="-130" r="9"/>
+      </g>
+
+      <!-- Wind arrows point at the boat from where the wind comes -->
+      <g id="tw-arrow" class="arrow tw">
+        <path d="M0,-298 L-28,-348 L-9,-348 L-9,-372 L9,-372 L9,-348 L28,-348 Z"/>
+        <text y="-330" id="tw-letter">T</text>
+      </g>
+      <g id="aw-arrow" class="arrow aw">
+        <path d="M0,-298 L-32,-352 L-11,-352 L-11,-372 L11,-372 L11,-352 L32,-352 Z"/>
+        <text y="-332" id="aw-letter">A</text>
+      </g>
+      <text id="no-data" class="no-data" y="8">Waiting for data…</text>
+    </svg>
+  </section>
+
+  <section class="side">
+    <div class="tiles">
+      <div class="tile" id="t-aws"><div class="label">AWS</div><div class="value">--</div><div class="unit">kn</div></div>
+      <div class="tile" id="t-awa"><div class="label">AWA</div><div class="value">--</div><div class="unit">&nbsp;</div></div>
+      <div class="tile" id="t-gust"><div class="label">GUST</div><div class="value">--</div><div class="unit">kn · 2 min</div></div>
+      <div class="tile" id="t-tws"><div class="label">TWS</div><div class="value">--</div><div class="unit">kn</div></div>
+      <div class="tile" id="t-twa"><div class="label">TWA</div><div class="value">--</div><div class="unit">&nbsp;</div></div>
+      <div class="tile" id="t-twd"><div class="label">TWD</div><div class="value">--</div><div class="unit">°T</div></div>
+      <div class="tile" id="t-sog"><div class="label">SOG</div><div class="value">--</div><div class="unit">kn</div></div>
+      <div class="tile" id="t-cog"><div class="label">COG</div><div class="value">--</div><div class="unit">°T</div></div>
+      <div class="tile" id="t-vmg"><div class="label">VMG</div><div class="value">--</div><div class="unit">kn to wind</div></div>
+    </div>
+
+    <div class="lower">
+      <div class="panel heel-panel">
+        <div class="panel-title">HEEL <span id="heel-max"></span></div>
+        <svg id="heel" viewBox="-260 -330 520 470" preserveAspectRatio="xMidYMid meet" aria-label="Heel">
+          <g id="heel-scale"></g>
+          <rect x="-260" y="0" width="520" height="140" class="water"/>
+          <g id="heel-boat">
+            <line class="rigging" x1="-110" y1="-56" x2="0" y2="-290"/>
+            <line class="rigging" x1="110" y1="-56" x2="0" y2="-290"/>
+            <rect x="-5" y="26" width="10" height="100" rx="3" class="fitting"/>
+            <path class="hull" d="M-116,-56 L-104,8 L0,28 L104,8 L116,-56 Q0,-64 -116,-56 Z"/>
+            <path class="cabin" d="M-64,-59 L-56,-104 L56,-104 L64,-59 Z"/>
+            <line class="mast-line" x1="0" y1="-104" x2="0" y2="-300"/>
+          </g>
+          <line x1="-260" x2="260" y1="0" y2="0" class="waterline"/>
+          <text x="-238" y="34" class="side-label">P</text>
+          <text x="238" y="34" class="side-label">S</text>
+          <text id="heel-text" x="0" y="96" class="heel-text">--</text>
+        </svg>
+      </div>
+      <div class="panel hist-panel">
+        <div class="panel-title">WIND · 20 MIN <span class="hist-key"><i class="sw tw"></i>TWD <i class="sw tws"></i>TWS</span></div>
+        <canvas id="hist"></canvas>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog id="bus-dialog">
+  <form method="dialog">
+    <div class="dialog-head">
+      <h2>NMEA 2000 bus</h2>
+      <button type="submit">Close</button>
+    </div>
+    <p id="bus-summary"></p>
+    <table>
+      <thead><tr><th>Addr</th><th>Device</th><th>Maker</th><th>Type</th><th>PGNs</th><th>Seen</th></tr></thead>
+      <tbody id="bus-rows"></tbody>
+    </table>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
