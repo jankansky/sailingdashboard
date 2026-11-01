@@ -1,5 +1,5 @@
 [Unit]
-Description=Potter 19 sailing dashboard (NMEA 2000 -> tablet web UI)
+Description=Sailing dashboard (NMEA 2000 -> tablet web UI)
 After=network.target
 
 [Service]

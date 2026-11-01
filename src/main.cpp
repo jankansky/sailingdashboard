@@ -1,4 +1,4 @@
-// Potter 19 sailing dashboard: listens to the NMEA 2000 bus and serves a
+// Sailing dashboard: listens to the NMEA 2000 bus and serves a
 // live boat visualization to tablets on the local network.
 
 #include <algorithm>

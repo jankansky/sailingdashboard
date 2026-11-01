@@ -1,4 +1,4 @@
-// Simulated Potter 19 sailing (Boston Harbor by default). It produces real NMEA 2000
+// Simulated sailing (Boston Harbor by default), with a Potter 19's performance. It produces real NMEA 2000
 // frames (including fast packets), so the decoder runs exactly as on the boat.
 
 #include <algorithm>

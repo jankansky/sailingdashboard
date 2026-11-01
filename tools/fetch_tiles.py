@@ -32,7 +32,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-USER_AGENT = "Potter19-sailing-dashboard offline tile prefetch (personal use)"
+USER_AGENT = "sailing-dashboard offline tile prefetch (personal use)"
 R = 6378137.0
 
 USGS = {

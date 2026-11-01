@@ -1,8 +1,9 @@
-# Potter 19 Sailing Dashboard
+# Sailing Dashboard
 
 A Raspberry Pi listens to the boat's NMEA 2000 bus through a PiCAN3 HAT (or an
-SH-C30A USB-CAN adapter). It serves a live visualization of the West Wight Potter 19
-to any tablet browser on the boat's Wi-Fi.
+SH-C30A USB-CAN adapter). It serves a live visualization of the boat to any tablet
+browser on the boat's Wi-Fi. You choose which boat is drawn, from a West Wight Potter 19
+to a 25 m catamaran (see [The display](#the-display)).
 
 - **Wind**: gWind Wireless 2 → GNX Wind → PGN 130306 (apparent wind)
 - **Heading and heel**: SteadyCast heading sensor → PGNs 127250, 127251, 127257
@@ -123,7 +124,7 @@ ssh $PI sudo reboot                                      # first time only
 
 `push.sh` copies the project to `~/sailingdashboard` on the Pi with rsync (only changed
 files) and runs the build there. Add `--tiles` when the map tiles change. Add
-`--hotspot Potter19 mypassword` to the `--setup` options to have the Pi create its own Wi-Fi
+`--hotspot MyBoat mypassword` to the `--setup` options to have the Pi create its own Wi-Fi
 network. Or copy the folder to the Pi any other way and run `./deploy/install.sh` there with
 the same options.
 
@@ -221,7 +222,7 @@ Edit `/etc/default/sailingdashboard`, then `sudo systemctl restart sailingdashbo
   - Red: above 25°
 - **Wind chart**: last 20 minutes of TWD (line) and TWS (shaded). The Pi keeps 30 minutes of history, so a tablet that was asleep catches up when it wakes.
 - **3D view**: tap **3D** at the bottom of the main panel.
-  - The Potter 19 model heels, pitches and turns with the sensors, and its sails are trimmed for the apparent wind.
+  - The boat model heels, pitches and turns with the sensors, and its sails are trimmed for the apparent wind.
   - Orange and blue 3D arrows show apparent and true wind; a purple stripe on the water shows course over ground.
   - Drag to orbit, pinch or scroll to zoom, double-tap to reset.
   - **Follow** keeps the camera behind the boat; **North up** fixes the camera so you watch the boat turn.
@@ -237,7 +238,7 @@ Edit `/etc/default/sailingdashboard`, then `sudo systemctl restart sailingdashbo
   - It runs on Three.js, saved in `web/vendor/` so it works without internet.
 - **Header**: status pills turn amber or red when a sensor goes quiet. **Damp** sets the smoothing. **Day/Dusk/Night** switches themes (Night is red-only).
 - **Screenshot** (camera button): saves a PNG of the whole dashboard, including the 3D view, to the
-  tablet's downloads. It's named after the time shown, e.g. `potter19-2026-07-04-143210.png`.
+  tablet's downloads. It's named after the boat and the time shown, e.g. `potter19-2026-07-04-143210.png`.
 
 ## Recordings and replay
 
@@ -270,7 +271,7 @@ replay times come from the boat's GPS.
 
 ```bash
 cmake -S . -B build && cmake --build build
-./build/sailingdashboard --sim --port 8080        # simulated Potter 19 off Boston
+./build/sailingdashboard --sim --port 8080        # simulated sailing off Boston
 ./build/sailingdashboard --sim-at casco --port 8080  # or start it in Casco Bay (or --sim-at LAT,LON)
 open http://localhost:8080/
 ```
