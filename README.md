@@ -72,8 +72,10 @@ boat 12 V (switched breaker) ─────────► PiCAN3 12 V input  (
 - **Wiring:** connect the N2K drop to **CAN0**: CAN_H to white, CAN_L to blue, GND to black. `can1` is spare.
 - **Termination:** disable the 120 Ω terminator on CAN0. Check the board's jumper or switch against
   Waveshare's wiki.
-- **Power:** it has no 12 V supply or real-time clock, unlike the PiCAN3. Power the Pi from a 12 V→5 V
-  converter (3 A). The CAN side is isolated, which helps avoid ground loops on a boat.
+- **Power:** like the PiCAN3, it can power the Pi from the boat's 12 V through its power input. The CAN
+  side is isolated, which helps avoid ground loops on a boat.
+- **Clock:** it has no real-time clock, unlike the PiCAN3. Away from the internet, recordings may be
+  dated wrong, but replay times still come from the boat's GPS (see [Recordings and replay](#recordings-and-replay)).
 - **Install:** run `./deploy/install.sh --canfd-hat` (it can be combined with `--imu`; not with `--pican3`),
   then reboot. Check with `dmesg | grep mcp251xfd` (expect "successfully initialized" for each channel)
   and `ip -details link show can0`.
