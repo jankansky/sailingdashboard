@@ -121,6 +121,7 @@ function applySettings() {
   document.documentElement.dataset.theme = THEMES[themeIdx][0];
   $('btn-theme').textContent = THEMES[themeIdx][1];
   drawHistory();
+  drawSpark();
   themeView3d();
 }
 
@@ -233,16 +234,31 @@ let lastHistoryPush = 0;
 const gustBuf = [];  // {t, v} wind speed samples, m/s
 const heelBuf = [];  // {t, v} abs heel, deg
 
+// Replay of a recording: { session, name, start, end, t, playing, speed, overview }, or null when live.
+let replay = null;
+let aisEpoch = 0;  // bumped when the data jumps, so the 3D view refetches AIS targets
+
+// Data seconds per real second.
+function dataRate() { return replay ? (replay.playing ? replay.speed : 0) : 1; }
+// Time of the data being shown (epoch ms): the boat's clock live, the recording's in a replay.
+function dataNow() {
+  return latest ? latest.t + (performance.now() - latestAt) * dataRate() : Date.now();
+}
+// Server URL, pointed at the replay session if there is one.
+function api(path) {
+  return replay ? `${path}${path.includes('?') ? '&' : '?'}session=${replay.session}` : path;
+}
+
 async function loadHistory() {
   try {
-    const rows = await (await fetch('api/history')).json();
+    const rows = await (await fetch(api('api/history'))).json();
     if (Array.isArray(rows)) history = rows;
     drawHistory();
   } catch { /* keep what we have */ }
 }
 
 function onData(d) {
-  const now = Date.now();
+  const now = d.t;
   const w = d.wind;
   const speed = fin(w.tws) ? w.tws : w.aws;
   if (fin(speed)) gustBuf.push({ t: now, v: speed });
@@ -250,7 +266,7 @@ function onData(d) {
   if (fin(d.att.heel)) heelBuf.push({ t: now, v: Math.abs(d.att.heel) });
   while (heelBuf.length && heelBuf[0].t < now - 60000) heelBuf.shift();
 
-  if (now - lastHistoryPush >= 1000) {
+  if (now - lastHistoryPush >= 1000 || now < lastHistoryPush) {
     lastHistoryPush = now;
     history.push([d.t, w.twd, w.tws, w.aws, d.nav.sog, d.att.heel]);
     while (history.length && history[0][0] < now - 30 * 60000) history.shift();
@@ -258,8 +274,26 @@ function onData(d) {
   }
 }
 
+// Forgets everything derived from earlier data, after switching between live and
+// replay or jumping in a replay. A jump keeps showing the last state until the
+// new one arrives: without it the 3D view would lose its position, heading and
+// time for a moment, and flicker while the slider is dragged.
+function resetData({ keepLatest = false } = {}) {
+  if (!keepLatest) latest = null;
+  history = [];
+  lastHistoryPush = 0;
+  gustBuf.length = 0;
+  heelBuf.length = 0;
+  for (const k of Object.keys(sm)) delete sm[k];  // no sweeping from the old values
+  avgCache = { t: 0, v: null };
+  aisEpoch++;
+  drawHistory();
+}
+
+let events = null;
 function connect() {
-  const es = new EventSource('events');
+  events?.close();
+  const es = events = new EventSource(api('events'));
   es.onopen = loadHistory;
   es.onmessage = e => {
     try {
@@ -268,6 +302,12 @@ function connect() {
       onData(latest);
     } catch { /* ignore a malformed message */ }
   };
+  es.addEventListener('playback', e => {
+    try { if (replay && es === events) Object.assign(replay, JSON.parse(e.data)); } catch { /* ignore */ }
+  });
+  es.addEventListener('gone', () => {  // the server ended the replay (restarted, or idle too long)
+    if (replay && es === events) exitReplay(false);
+  });
   // EventSource reconnects by itself after errors.
 }
 
@@ -429,13 +469,20 @@ function drawFrame(nowMs) {
     try {  // a 3D failure must not freeze the instruments
       view3d.view.update({
         hdg, cog, heel, pitch, trim, lat: n.lat, lon: n.lon, sog: n.sog, cogTrue: n.cog,
-        utc: testClock ? testClock() : fin(n.utc) ? n.utc + (performance.now() - latestAt) : null,
+        utc: testClock && !replay ? testClock()
+          : fin(n.utc) ? n.utc + (performance.now() - latestAt) * dataRate() : replay ? dataNow() : null,
         awa: awa != null ? wrap180(awa) : null,
         twa: twa != null ? wrap180(twa) : null,
+        ais: { url: api('api/ais'), rate: dataRate(), epoch: aisEpoch },
       });
     } catch (err) {
       reportError('3D view', err);
     }
+  }
+  if (shotWaiting) {  // the 3D canvas can only be copied straight after it renders
+    const gl = view3d.active && view3d.view ? view3d.view.canvas : null;
+    shotWaiting(gl ? copyCanvas(gl) : null);
+    shotWaiting = null;
   }
   show(els.noData, !link || (awa == null && hdg == null));
   els.noData.textContent = !d ? 'Waiting for data…' : !link ? 'No connection to boat' : 'No sensor data';
@@ -497,17 +544,24 @@ function updateText(v) {
   $('heel-max').textContent = heelBuf.length && link
     ? `· max ${Math.round(Math.max(...heelBuf.map(x => x.v)))}° / 1 min · ${heelSrc}` : '';
 
-  const t = testClock ? new Date(testClock())
+  const t = replay ? new Date(dataNow())
+    : testClock ? new Date(testClock())
     : link && fin(n.utc) ? new Date(n.utc + (performance.now() - latestAt)) : new Date();
-  const time = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-  $('clock').textContent = testClock ? `TEST ${t.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}` : time;
+  const time = fmtTime(t);
+  const date = t.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  $('clock').textContent = replay ? `${date} ${time}` : testClock ? `TEST ${date} ${time}` : time;
+  updatePlaybar();
+}
+
+function fmtTime(t) {
+  return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 }
 
 // Mean true wind direction over the last 10 minutes: the hollow marker on the
 // compass card. The live TWD moving away from it shows a lift or header.
 let avgCache = { t: 0, v: null };
 function twdAverage() {
-  const now = Date.now();
+  const now = dataNow();
   if (now - avgCache.t < 2000) return avgCache.v;
   const recent = history.filter(r => r[0] > now - 600000 && fin(r[1])).map(r => r[1]);
   avgCache = { t: now, v: recent.length >= 60 ? circularMean(recent) : null };
@@ -530,7 +584,7 @@ function drawHistory() {
   const col = name => css.getPropertyValue(name).trim();
   ctx.font = '12px -apple-system, Roboto, sans-serif';
 
-  const now = Date.now(), span = 20 * 60000;
+  const now = dataNow(), span = 20 * 60000;
   const pts = history.filter(r => r[0] > now - span);
   const dirs = pts.map(r => r[1]).filter(fin);
   if (dirs.length < 2) {
@@ -645,8 +699,8 @@ function td(text, cls) {
 async function refreshBus() {
   try {
     const [devices, state] = await Promise.all([
-      fetch('api/devices').then(r => r.json()),
-      fetch('api/state').then(r => r.json()),
+      fetch(api('api/devices')).then(r => r.json()),
+      fetch(api('api/state')).then(r => r.json()),
     ]);
     const b = state.bus;
     $('bus-summary').textContent =
@@ -667,7 +721,8 @@ async function refreshBus() {
     }
     if (!devices.length) {
       const tr = document.createElement('tr');
-      const c = td('No devices heard yet. Check wiring, termination and bitrate (250 kbit/s).');
+      const c = td(replay ? 'No devices in the recording up to this point.'
+        : 'No devices heard yet. Check wiring, termination and bitrate (250 kbit/s).');
       c.colSpan = 6;
       tr.appendChild(c);
       rows.appendChild(tr);
@@ -683,6 +738,297 @@ $('btn-bus').addEventListener('click', () => {
   busTimer = setInterval(refreshBus, 2000);
 });
 $('bus-dialog').addEventListener('close', () => clearInterval(busTimer));
+
+// ------------------------------------------------------------ replay
+
+const SPEEDS = [1, 2, 5, 10, 30, 60];
+const scrub = { dragging: false, busy: false, want: null, last: null };
+
+async function post(path) {
+  const r = await fetch(path, { method: 'POST' });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || `server said ${r.status}`);
+  return body;
+}
+
+async function startReplay(name) {
+  const info = await post(`api/playback/open?file=${encodeURIComponent(name)}`);
+  if (replay) post(`api/playback/close?session=${replay.session}`).catch(() => {});
+  replay = info;
+  scrub.last = null;
+  store.set('replay', { session: info.session });
+  resetData();
+  connect();
+  show($('playbar'), true);
+  show($('pill-replay'), true);
+  drawSpark();
+  await control({ play: 1 });
+}
+
+// Back to the live boat. close: also tell the server (false if it already ended the session).
+function exitReplay(close = true) {
+  if (!replay) return;
+  if (close) post(`api/playback/close?session=${replay.session}`).catch(() => {});
+  replay = null;
+  store.set('replay', null);
+  resetData();
+  connect();
+  show($('playbar'), false);
+  show($('pill-replay'), false);
+}
+
+async function control(params) {
+  if (!replay) return;
+  const q = Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  try {
+    Object.assign(replay, await post(`api/playback/control?session=${replay.session}&${q}`));
+  } catch {
+    exitReplay(false);  // the session is gone
+    return;
+  }
+  if ('seek' in params) {  // show the new moment at once instead of at the next update
+    resetData({ keepLatest: true });
+    try {
+      latest = await (await fetch(api('api/state'))).json();
+      latestAt = performance.now();
+      onData(latest);
+    } catch { /* the next update will do */ }
+    loadHistory();
+  }
+  updatePlaybar();
+}
+
+// Seeks while the slider is dragged, one request at a time, always to the latest position.
+async function seekTo(ms) {
+  ms = Math.round(ms);
+  if (ms === scrub.last && scrub.want == null) return;  // e.g. the slider's change event after its last input
+  scrub.want = ms;
+  if (scrub.busy) return;
+  scrub.busy = true;
+  while (scrub.want != null) {
+    const t = scrub.want;
+    scrub.want = null;
+    scrub.last = t;
+    await control({ seek: t });
+  }
+  scrub.busy = false;
+}
+
+function fmtDuration(ms) {
+  const m = Math.round(ms / 60000);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+}
+
+function updatePlaybar() {
+  if (!replay) return;
+  const slider = $('play-slider');
+  slider.min = replay.start;
+  slider.max = replay.end;
+  const t = scrub.dragging ? Number(slider.value) : clamp(latest ? dataNow() : replay.t, replay.start, replay.end);
+  if (!scrub.dragging) slider.value = t;
+  $('play-time').textContent = fmtTime(t);
+  $('play-span').textContent = ` / ${fmtDuration(replay.end - replay.start)}`;
+  $('play-toggle').textContent = replay.playing ? '❚❚' : '▶';
+  $('play-toggle').setAttribute('aria-label', replay.playing ? 'Pause' : 'Play');
+  $('play-speed').textContent = `${replay.speed}×`;
+}
+
+// Boat speed through the whole recording, drawn behind the slider to help find the action.
+function drawSpark() {
+  const canvas = $('play-spark');
+  const rect = canvas.getBoundingClientRect();
+  if (!replay || !rect.width) return;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(rect.width * dpr);
+  canvas.height = Math.round(rect.height * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const pts = (replay.overview || []).filter(p => fin(p[1]));
+  if (pts.length < 2) return;
+  const span = Math.max(1, replay.end - replay.start);
+  const top = Math.max(1, ...pts.map(p => p[1]));
+  const css = getComputedStyle(document.documentElement);
+  ctx.fillStyle = css.getPropertyValue('--tw').trim();
+  ctx.globalAlpha = 0.25;
+  ctx.beginPath();
+  ctx.moveTo(0, rect.height);
+  for (const [t, sog] of pts) ctx.lineTo((t - replay.start) / span * rect.width, rect.height * (1 - 0.9 * sog / top));
+  ctx.lineTo(rect.width, rect.height);
+  ctx.fill();
+}
+
+$('play-toggle').addEventListener('click', () => control({ play: replay?.playing ? 0 : 1 }));
+$('play-speed').addEventListener('click', () => {
+  if (replay) control({ speed: SPEEDS[(SPEEDS.indexOf(replay.speed) + 1) % SPEEDS.length] });
+});
+$('play-live').addEventListener('click', () => exitReplay());
+const slider = $('play-slider');
+slider.addEventListener('pointerdown', () => { scrub.dragging = true; });
+slider.addEventListener('input', () => {
+  scrub.dragging = true;
+  updatePlaybar();
+  seekTo(Number(slider.value));
+});
+slider.addEventListener('change', () => {
+  seekTo(Number(slider.value)).finally(() => { scrub.dragging = false; });
+});
+document.addEventListener('keydown', e => {
+  if (!replay || e.target.closest?.('input, dialog')) return;
+  if (e.key === ' ') {
+    e.preventDefault();
+    control({ play: replay.playing ? 0 : 1 });
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    const step = (e.shiftKey ? 60000 : 10000) * (e.key === 'ArrowLeft' ? -1 : 1);
+    seekTo(clamp(dataNow() + step, replay.start, replay.end));
+  }
+});
+window.addEventListener('resize', drawSpark);
+
+// After a reload, pick the replay up where it was if the server still has it.
+async function resumeReplay() {
+  const saved = store.get('replay', null);
+  if (!saved?.session) return;
+  try {
+    const r = await fetch(`api/playback/status?session=${saved.session}&overview=1`);
+    if (!r.ok) throw new Error();
+    replay = { ...(await r.json()), session: saved.session };
+    show($('playbar'), true);
+    show($('pill-replay'), true);
+    drawSpark();
+  } catch {
+    store.set('replay', null);
+  }
+}
+
+// ------------------------------------------------------------ recordings dialog
+
+function fmtBytes(n) {
+  return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.ceil(n / 1e3)} kB`;
+}
+
+async function refreshLogs() {
+  const rows = $('logs-rows');
+  try {
+    const { recorder, files } = await (await fetch('api/recordings')).json();
+    $('logs-summary').textContent = !recorder.enabled
+      ? 'Recording is off. Start the server with --record DIR to log the bus.'
+      : `${recorder.active ? `Recording now to ${recorder.file} (${fmtBytes(recorder.bytes)})` : 'Recording: waiting for bus traffic'}` +
+        ` · ${fmtBytes(recorder.free)} free on the card`;
+    rows.replaceChildren();
+    for (const f of files) {
+      const tr = document.createElement('tr');
+      const start = new Date(f.start), end = new Date(f.end);
+      const hm = t => t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+      const live = recorder.active && f.name === recorder.file;
+      tr.append(
+        td(start.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })),
+        td(`${hm(start)}–${live ? 'now' : hm(end)}`),
+        td(fmtDuration(f.end - f.start)),
+        td(fmtBytes(f.bytes)),
+      );
+      const cell = document.createElement('td');
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      cell.appendChild(actions);
+      const play = document.createElement('button');
+      play.type = 'button';
+      play.textContent = 'Replay';
+      play.addEventListener('click', async () => {
+        play.disabled = true;
+        play.textContent = 'Opening…';
+        try {
+          await startReplay(f.name);
+          $('logs-dialog').close();
+        } catch (err) {
+          play.textContent = 'Failed';
+          reportError('Replay', err);
+        }
+      });
+      const save = document.createElement('a');
+      save.href = `recordings/${encodeURIComponent(f.name)}`;
+      save.download = f.name;
+      save.textContent = 'Download';
+      save.className = 'link-button';
+      actions.append(play, save);
+      tr.appendChild(cell);
+      rows.appendChild(tr);
+    }
+    if (!files.length) {
+      const tr = document.createElement('tr');
+      const c = td('No recordings yet.');
+      c.colSpan = 5;
+      tr.appendChild(c);
+      rows.appendChild(tr);
+    }
+  } catch {
+    $('logs-summary').textContent = 'Cannot reach the dashboard server.';
+  }
+}
+
+$('btn-logs').addEventListener('click', () => {
+  $('logs-dialog').showModal();
+  refreshLogs();
+});
+
+// REC pill: shown when the Pi is recording, lit while data is being written.
+async function refreshRecorder() {
+  try {
+    const rec = await (await fetch('api/recorder')).json();
+    show($('pill-rec'), rec.enabled);
+    $('pill-rec').classList.toggle('on', Boolean(rec.active));
+  } catch { /* keep the last state */ }
+}
+setInterval(refreshRecorder, 5000);
+
+// ------------------------------------------------------------ screenshot
+
+let shotWaiting = null;  // resolved by the next frame with a copy of the 3D canvas (or null)
+
+function copyCanvas(src) {
+  const c = document.createElement('canvas');
+  c.width = src.width;
+  c.height = src.height;
+  c.getContext('2d').drawImage(src, 0, 0);
+  return c;
+}
+
+function toast(text) {
+  const el = $('toast');
+  el.textContent = text;
+  show(el, true);
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => show(el, false), 2500);
+}
+
+async function saveScreenshot() {
+  const btn = $('btn-shot');
+  btn.disabled = true;
+  try {
+    const gl = await new Promise(resolve => { shotWaiting = resolve; });
+    const { capturePage } = await import('./screenshot.js');
+    const canvas = await capturePage(document.body, { substitutes: gl ? new Map([[view3d.view.canvas, gl]]) : new Map() });
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('could not encode the image');
+    const t = new Date(dataNow());
+    const p2 = n => String(n).padStart(2, '0');
+    const name = `potter19-${t.getFullYear()}-${p2(t.getMonth() + 1)}-${p2(t.getDate())}` +
+      `-${p2(t.getHours())}${p2(t.getMinutes())}${p2(t.getSeconds())}${replay ? '-replay' : ''}.png`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    toast(`Saved ${name}`);
+  } catch (err) {
+    reportError('Screenshot', err);
+  } finally {
+    btn.disabled = false;
+  }
+}
+$('btn-shot').addEventListener('click', saveScreenshot);
 
 // ------------------------------------------------------------ screen awake
 
@@ -706,5 +1052,8 @@ applySettings();
 setFollow(view3d.follow);
 setView(store.get('view', '2d') === '3d');
 window.addEventListener('resize', drawHistory);
-connect();
-requestAnimationFrame(frame);
+refreshRecorder();
+resumeReplay().finally(() => {
+  connect();
+  requestAnimationFrame(frame);
+});

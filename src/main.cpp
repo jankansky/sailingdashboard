@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <thread>
 
@@ -15,6 +16,7 @@
 #include "http_server.hpp"
 #include "imu_rvc.hpp"
 #include "n2k.hpp"
+#include "recorder.hpp"
 
 namespace {
 
@@ -40,11 +42,16 @@ void usage(const char* argv0) {
         "  --invert-roll        flip heel direction if the sensor is mounted reversed\n"
         "  --imu DEVICE         BNO085 in UART-RVC mode for heel/pitch, e.g. /dev/serial0\n"
         "                       (used when no attitude sensor is on the bus)\n"
+        "  --record DIR         log the bus to DIR (one candump file per outing) and offer\n"
+        "                       the recordings for replay on the tablet\n"
+        "  --record-max-gb N    delete the oldest recordings beyond N GB (default 8)\n"
+        "  --recordings DIR     offer recordings in DIR for replay without recording\n"
+        "  --no-record          turn off a --record given earlier (e.g. in the service file)\n"
         "  --verbose            print every decoded message\n",
         argv0);
 }
 
-void readBus(FrameSource& source, BoatState& state, bool verbose) {
+void readBus(FrameSource& source, BoatState& state, Recorder* recorder, bool verbose) {
     n2k::Decoder decoder(state, verbose);
     CanFrame frame;
     while (!g_stop) {
@@ -59,7 +66,10 @@ void readBus(FrameSource& source, BoatState& state, bool verbose) {
         }
         int r;
         while (!g_stop && (r = source.read(frame, 500)) >= 0)
-            if (r == 1) decoder.handle(frame);
+            if (r == 1) {
+                if (recorder) recorder->write(frame);
+                decoder.handle(frame);
+            }
         source.close();
         {
             std::lock_guard lock(state.mu);
@@ -77,7 +87,9 @@ int main(int argc, char** argv) {
     int port = 8080;
     double rate = 5;
     bool verbose = false, loop = false;
-    std::string replayPath, imuDevice;
+    std::string replayPath, imuDevice, recordDir, recordingsDir;
+    double recordMaxGb = 8;
+    bool noRecord = false;
     bool sim = false;
     double simLat = 42.3355, simLon = -70.9920;  // Boston outer harbor
     BoatState state;
@@ -115,6 +127,10 @@ int main(int argc, char** argv) {
         else if (a == "--roll-offset") state.settings.rollOffsetDeg = std::atof(next().c_str());
         else if (a == "--invert-roll") state.settings.invertRoll = true;
         else if (a == "--imu") imuDevice = next();
+        else if (a == "--record") recordDir = next();
+        else if (a == "--record-max-gb") recordMaxGb = std::max(0.1, std::atof(next().c_str()));
+        else if (a == "--recordings") recordingsDir = next();
+        else if (a == "--no-record") noRecord = true;
         else if (a == "--verbose") verbose = true;
         else {
             usage(argv[0]);
@@ -127,25 +143,38 @@ int main(int argc, char** argv) {
     while (webRoot.size() > 1 && webRoot.back() == '/') webRoot.pop_back();
     while (tilesRoot.size() > 1 && tilesRoot.back() == '/') tilesRoot.pop_back();
     state.sourceName = source->describe();
+    std::unique_ptr<Recorder> recorder;
+    if (!recordDir.empty()) {
+        while (recordDir.size() > 1 && recordDir.back() == '/') recordDir.pop_back();
+        if (noRecord) std::printf("recording is off (--no-record)\n");
+        else if (replayPath.empty()) recorder = std::make_unique<Recorder>(recordDir, recordMaxGb);
+        else std::printf("not recording while replaying a file\n");
+        if (recordingsDir.empty()) recordingsDir = recordDir;
+    }
+    while (recordingsDir.size() > 1 && recordingsDir.back() == '/') recordingsDir.pop_back();
 
     std::setvbuf(stdout, nullptr, _IOLBF, 0);  // timely logs under systemd
     std::signal(SIGPIPE, SIG_IGN);
     std::signal(SIGINT, [](int) { g_stop = true; });
     std::signal(SIGTERM, [](int) { g_stop = true; });
 
-    std::thread reader(readBus, std::ref(*source), std::ref(state), verbose);
+    std::thread reader(readBus, std::ref(*source), std::ref(state), recorder.get(), verbose);
     std::thread imu;
-    if (!imuDevice.empty()) imu = std::thread(runImuRvc, imuDevice, std::ref(state), std::cref(g_stop));
-    std::thread sampler([&state] {
+    std::function<void(const CanFrame&)> recordImu;
+    if (recorder) recordImu = [r = recorder.get()](const CanFrame& f) { r->write(f); };
+    if (!imuDevice.empty())
+        imu = std::thread(runImuRvc, imuDevice, std::ref(state), std::cref(g_stop), std::cref(recordImu));
+    std::thread sampler([&state, &recorder] {
         auto next = std::chrono::steady_clock::now();
         while (!g_stop) {
             next += std::chrono::seconds(1);
             std::this_thread::sleep_until(next);
             state.sampleHistory();
+            if (recorder) recorder->tick();
         }
     });
 
-    HttpServer server(state, webRoot, tilesRoot, port, rate);
+    HttpServer server(state, webRoot, tilesRoot, recordingsDir, recorder.get(), port, rate);
     bool ok = server.run(g_stop);
     g_stop = true;
     reader.join();

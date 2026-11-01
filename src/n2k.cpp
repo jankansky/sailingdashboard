@@ -149,12 +149,21 @@ std::vector<CanFrame> encode(uint32_t pgn, uint8_t source, uint8_t priority,
 }
 
 void Decoder::handle(const CanFrame& frame) {
+    if (frame.id == kImuFrameId) {  // the Pi's own IMU, as recorded in a log
+        if (frame.len < 4) return;
+        std::lock_guard lock(st_.mu);
+        st_.imuPitch = i16f(frame.data, 1e-4);
+        st_.imuRoll = i16f(frame.data + 2, 1e-4);
+        st_.imuT.touch(st_.now());
+        return;
+    }
     Id id = parseId(frame.id);
     std::lock_guard lock(st_.mu);
+    auto now = st_.now();
 
     st_.frames++;
     DeviceInfo& dev = st_.devices[id.source];
-    dev.lastSeen = Clock::now();
+    dev.lastSeen = now;
     dev.frames++;
     dev.pgns.insert(id.pgn);
 
@@ -173,7 +182,7 @@ void Decoder::handle(const CanFrame& frame) {
         fp = FastPacket{};
         fp.sequence = seq;
         fp.total = frame.data[1];
-        fp.started = Clock::now();
+        fp.started = now;
         std::memcpy(fp.buf, frame.data + 2, std::min<size_t>(6, frame.len - 2));
         fp.received = 1;
     } else {
@@ -191,7 +200,7 @@ void Decoder::handle(const CanFrame& frame) {
     if (std::popcount(fp.received) == needed) {
         dispatch(id.pgn, id.source, fp.buf, fp.total);
         fastPackets_.erase(key);
-    } else if (Clock::now() - fp.started > std::chrono::seconds(2)) {
+    } else if (now - fp.started > std::chrono::seconds(2)) {
         fastPackets_.erase(key);
     }
 }
@@ -217,9 +226,9 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
     case 126992: {  // System Time
         if (len < 8) return;
         int64_t ms;
-        if (dateTimeMs(d + 2, d + 4, ms) && !s.gnssT.fresh(Clock::now(), 3)) {  // prefer GNSS time
+        if (dateTimeMs(d + 2, d + 4, ms) && !s.gnssT.fresh(s.now(), 3)) {  // prefer GNSS time
             s.utcMs = ms;
-            s.utcT.touch();
+            s.utcT.touch(s.now());
         }
         break;
     }
@@ -239,13 +248,13 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
         int ref = d[7] & 0x3;
         if (ref > 1 || !std::isfinite(s.heading)) return;
         s.headingIsMag = ref == 1;
-        s.headingT.touch();
+        s.headingT.touch(s.now());
         break;
     }
     case 127251: {  // Rate of Turn
         if (len < 5) return;
         s.rot = i32f(d + 1, 3.125e-8);
-        s.rotT.touch();
+        s.rotT.touch(s.now());
         break;
     }
     case 127257: {  // Attitude
@@ -253,7 +262,7 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
         s.yaw = i16f(d + 1, 1e-4);
         s.pitch = i16f(d + 3, 1e-4);
         s.roll = i16f(d + 5, 1e-4);
-        s.attT.touch();
+        s.attT.touch(s.now());
         break;
     }
     case 127258: {  // Magnetic Variation
@@ -261,13 +270,13 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
         double v = i16f(d + 4, 1e-4);
         if (!std::isfinite(v)) return;
         s.variation = v;
-        s.variationT.touch();
+        s.variationT.touch(s.now());
         break;
     }
     case 128259: {  // Speed, Water Referenced
         if (len < 3) return;
         s.stw = u16f(d + 1, 0.01);
-        s.stwT.touch();
+        s.stwT.touch(s.now());
         break;
     }
     case 128267: {  // Water Depth
@@ -275,7 +284,7 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
         double depth = u32f(d + 1, 0.01);
         double offset = i16f(d + 5, 0.001);
         s.depth = depth + (std::isfinite(offset) ? offset : 0);
-        s.depthT.touch();
+        s.depthT.touch(s.now());
         break;
     }
     case 129025: {  // Position, Rapid Update
@@ -284,8 +293,8 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
         if (!std::isfinite(lat) || !std::isfinite(lon)) return;
         s.lat = lat;
         s.lon = lon;
-        s.posT.touch();
-        s.posRapidT.touch();
+        s.posT.touch(s.now());
+        s.posRapidT.touch(s.now());
         break;
     }
     case 129026: {  // COG & SOG, Rapid Update
@@ -293,7 +302,7 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
         s.cogIsMag = (d[1] & 0x3) == 1;
         s.cog = u16f(d + 2, 1e-4);
         s.sog = u16f(d + 4, 0.01);
-        s.cogT.touch();
+        s.cogT.touch(s.now());
         break;
     }
     case 129029: {  // GNSS Position Data
@@ -301,20 +310,20 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
         int64_t ms;
         if (dateTimeMs(d + 1, d + 3, ms)) {
             s.utcMs = ms;
-            s.utcT.touch();
+            s.utcT.touch(s.now());
         }
         double lat = i64f(d + 7, 1e-16), lon = i64f(d + 15, 1e-16);
         int method = d[31] >> 4;
         if (std::isfinite(lat) && std::isfinite(lon) && method >= 1 && method <= 5 &&
-            !s.posRapidT.fresh(Clock::now(), 1.5)) {  // rapid updates win
+            !s.posRapidT.fresh(s.now(), 1.5)) {  // rapid updates win
             s.lat = lat;
             s.lon = lon;
-            s.posT.touch();
+            s.posT.touch(s.now());
         }
         s.fixMethod = method;
         s.sats = d[33] == 0xFF ? -1 : d[33];
         s.hdop = i16f(d + 34, 0.01);
-        s.gnssT.touch();
+        s.gnssT.touch(s.now());
         break;
     }
     case 129038:  // AIS Class A Position Report
@@ -344,9 +353,9 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
             t.length = u16f(d + 24, 0.1);
             t.beam = u16f(d + 26, 0.1);
             t.name = fixedString(d + 32, 20);
-            t.staticT.touch();
+            t.staticT.touch(s.now());
         }
-        t.posT.touch();
+        t.posT.touch(s.now());
         break;
     }
     case 129794: {  // AIS Class A Static and Voyage Related Data
@@ -358,7 +367,7 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
         t.shipType = d[36] == 0xFF ? -1 : d[36];
         t.length = u16f(d + 37, 0.1);
         t.beam = u16f(d + 39, 0.1);
-        t.staticT.touch();
+        t.staticT.touch(s.now());
         break;
     }
     case 129809: {  // AIS Class B static data, part A: name
@@ -366,7 +375,7 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
         AisTarget& t = s.ais[u32(d + 1)];
         t.aisClass = 'B';
         t.name = fixedString(d + 5, 20);
-        t.staticT.touch();
+        t.staticT.touch(s.now());
         break;
     }
     case 129810: {  // AIS Class B static data, part B: type, call sign, size
@@ -377,7 +386,7 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
         t.callsign = fixedString(d + 13, 7);
         t.length = u16f(d + 20, 0.1);
         t.beam = u16f(d + 22, 0.1);
-        t.staticT.touch();
+        t.staticT.touch(s.now());
         break;
     }
     case 130306: {  // Wind Data
@@ -388,20 +397,20 @@ void Decoder::dispatch(uint32_t pgn, uint8_t src, const uint8_t* d, size_t len) 
         case 2:  // apparent
             s.aws = speed;
             s.awa = wrapPi(angle);
-            s.windT.touch();
+            s.windT.touch(s.now());
             break;
         case 0:  // true, ground referenced to north
             s.devTws = speed;
             s.devTwd = angle;
             s.devTwa = NAN;
-            s.devTrueT.touch();
+            s.devTrueT.touch(s.now());
             break;
         case 3:  // true, boat referenced
         case 4:  // true, water referenced
             s.devTws = speed;
             s.devTwa = wrapPi(angle);
             s.devTwd = NAN;
-            s.devTrueT.touch();
+            s.devTrueT.touch(s.now());
             break;
         default:
             break;

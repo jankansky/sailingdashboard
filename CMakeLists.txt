@@ -17,6 +17,8 @@ add_executable(sailingdashboard
         src/simulator.cpp
         src/http_server.cpp
         src/imu_rvc.cpp
-        src/serial_port.cpp)
+        src/serial_port.cpp
+        src/recorder.cpp
+        src/playback.cpp)
 target_compile_options(sailingdashboard PRIVATE -Wall -Wextra)
 target_link_libraries(sailingdashboard PRIVATE Threads::Threads)

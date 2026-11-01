@@ -120,12 +120,15 @@ export class AisLayer {
     this.cpaMat = cpaMat;
     this.lastPoll = -Infinity;
     this.polling = false;
+    this.feed = { url: 'api/ais', rate: 1, epoch: 0 };
   }
 
   async poll() {
     this.polling = true;
+    const epoch = this.feed.epoch;
     try {
-      const list = await (await fetch('api/ais', { cache: 'no-store' })).json();
+      const list = await (await fetch(this.feed.url, { cache: 'no-store' })).json();
+      if (epoch !== this.feed.epoch) return;  // the replay jumped meanwhile; this list is stale
       const fetched = performance.now();
       const seen = new Set();
       for (const d of list) {
@@ -170,9 +173,19 @@ export class AisLayer {
   }
 
   // own: { lat, lon, sog (m/s), cog (deg true) }
-  update(own, cameraDistance) {
+  // feed: { url, rate (data seconds per real second; 0 when a replay is paused),
+  //         epoch (changes when a replay jumps, to fetch again at once) }
+  update(own, cameraDistance, feed = this.feed) {
     const now = performance.now();
-    if (!this.polling && now - this.lastPoll > POLL_MS) {
+    if (feed.epoch !== this.feed.epoch || feed.url !== this.feed.url) this.lastPoll = -Infinity;
+    if (feed.rate !== this.feed.rate) {  // keep dead reckoning continuous across a speed change
+      for (const t of this.targets.values()) {
+        t.data.age += (now - t.fetched) / 1000 * this.feed.rate;
+        t.fetched = now;
+      }
+    }
+    this.feed = feed;
+    if (!this.polling && now - this.lastPoll > POLL_MS / Math.max(1, Math.min(feed.rate, 5))) {
       this.lastPoll = now;
       this.poll();
     }
@@ -191,7 +204,7 @@ export class AisLayer {
     for (const t of this.targets.values()) {
       const d = t.data;
       // Dead-reckon from the last report so targets glide between updates.
-      const dt = d.age + (now - t.fetched) / 1000;
+      const dt = d.age + (now - t.fetched) / 1000 * this.feed.rate;
       const moving = Number.isFinite(d.sog) && d.sog * KN >= MIN_MOVING_KN && Number.isFinite(d.cog) &&
         !STATIONARY_STATUS.has(d.nav);
       const sog = moving ? d.sog : 0;

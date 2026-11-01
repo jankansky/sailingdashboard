@@ -4,8 +4,10 @@ After=network.target
 
 [Service]
 EnvironmentFile=-/etc/default/sailingdashboard
-ExecStart=/opt/sailingdashboard/sailingdashboard --web /opt/sailingdashboard/web --tiles /opt/sailingdashboard/tiles $DASH_ARGS
+ExecStart=/opt/sailingdashboard/sailingdashboard --web /opt/sailingdashboard/web --tiles /opt/sailingdashboard/tiles --record /var/lib/sailingdashboard/recordings $DASH_ARGS
 DynamicUser=yes
+# Recordings of the bus live in /var/lib/sailingdashboard (kept across restarts and updates).
+StateDirectory=sailingdashboard
 SupplementaryGroups=dialout
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always

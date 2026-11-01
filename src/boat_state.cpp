@@ -1,4 +1,5 @@
 #include "boat_state.hpp"
+#include "json.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -21,104 +22,19 @@ double wrapPi(double a) {
     return a > kPi ? a - 2 * kPi : a;
 }
 
-int64_t epochMs() {
-    using namespace std::chrono;
-    return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+// Age in seconds of a stamp, or null if it was never set.
+void age(JsonWriter& j, std::string_view k, const Stamp& s, Clock::time_point now) {
+    j.num(k, s.valid() ? s.age(now) : NAN, 1);
 }
 
-// Minimal streaming JSON writer. NaN numbers become null.
-class JsonWriter {
-public:
-    std::string out;
-
-    void beginObj(std::string_view k = {}) { open(k, '{'); }
-    void endObj() { close('}'); }
-    void beginArr(std::string_view k = {}) { open(k, '['); }
-    void endArr() { close(']'); }
-
-    void num(std::string_view k, double v, int prec = 2) {
-        key(k);
-        raw(v, prec);
-    }
-    void num(double v, int prec = 2) {
-        sep();
-        raw(v, prec);
-    }
-    void integer(std::string_view k, int64_t v) {
-        key(k);
-        out += std::to_string(v);
-    }
-    void integer(int64_t v) {
-        sep();
-        out += std::to_string(v);
-    }
-    void boolean(std::string_view k, bool v) {
-        key(k);
-        out += v ? "true" : "false";
-    }
-    void str(std::string_view k, std::string_view v) {
-        key(k);
-        quoted(v);
-    }
-    void strOrNull(std::string_view k, const char* v) {
-        key(k);
-        if (v) quoted(v);
-        else out += "null";
-    }
-    // Age in seconds of a stamp, or null if it was never set.
-    void age(std::string_view k, const Stamp& s, Clock::time_point now) {
-        num(k, s.valid() ? s.age(now) : NAN, 1);
-    }
-
-private:
-    std::vector<bool> first_;
-
-    void sep() {
-        if (first_.empty()) return;
-        if (!first_.back()) out += ',';
-        first_.back() = false;
-    }
-    void key(std::string_view k) {
-        sep();
-        quoted(k);
-        out += ':';
-    }
-    void open(std::string_view k, char c) {
-        if (k.empty()) sep();
-        else key(k);
-        out += c;
-        first_.push_back(true);
-    }
-    void close(char c) {
-        out += c;
-        first_.pop_back();
-    }
-    void raw(double v, int prec) {
-        if (!std::isfinite(v)) {
-            out += "null";
-            return;
-        }
-        char buf[32];
-        std::snprintf(buf, sizeof buf, "%.*f", prec, v);
-        out += buf;
-    }
-    void quoted(std::string_view s) {
-        out += '"';
-        for (unsigned char c : s) {
-            if (c == '"' || c == '\\') {
-                out += '\\';
-                out += static_cast<char>(c);
-            } else if (c < 0x20 || c > 0x7E) {
-                out += '?';
-            } else {
-                out += static_cast<char>(c);
-            }
-        }
-        out += '"';
-    }
-};
-
 }  // namespace
+
+int64_t BoatState::epochMs() const {
+    using namespace std::chrono;
+    int64_t us = playbackUs_.load();
+    if (us >= 0) return us / 1000;
+    return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
 
 BoatState::Derived BoatState::derive(Clock::time_point now) {
     Derived d;
@@ -217,7 +133,7 @@ BoatState::Derived BoatState::derive(Clock::time_point now) {
 
 std::string BoatState::stateJson() {
     std::lock_guard lock(mu);
-    auto now = Clock::now();
+    auto now = this->now();
     Derived d = derive(now);
 
     if (!rateT_.time_since_epoch().count()) rateT_ = now;
@@ -241,7 +157,7 @@ std::string BoatState::stateJson() {
     j.endObj();
 
     j.beginObj("wind");
-    j.age("age", windT, now);
+    age(j, "age", windT, now);
     j.num("aws", aws);
     j.num("awa", awa * kDeg, 1);
     j.num("tws", d.tws);
@@ -251,14 +167,14 @@ std::string BoatState::stateJson() {
     j.endObj();
 
     j.beginObj("nav");
-    j.age("hdgAge", headingT, now);
+    age(j, "hdgAge", headingT, now);
     j.num("hdg", d.hdgTrue * kDeg, 1);
     j.num("hdgMag", d.hdgMag * kDeg, 1);
     j.strOrNull("hdgSrc", d.hdgSrc);
     j.num("var", d.var * kDeg, 1);
     j.boolean("varKnown", d.varKnown);
     j.num("rot", rotT.fresh(now) ? rot * kDeg * 60 : NAN, 1);  // deg/min
-    j.age("gpsAge", cogT.valid() ? cogT : posT, now);
+    age(j, "gpsAge", cogT.valid() ? cogT : posT, now);
     j.num("cog", cogT.fresh(now) ? wrap2Pi(cog + (cogIsMag ? d.var : 0)) * kDeg : NAN, 1);
     j.num("sog", cogT.fresh(now) ? sog : NAN);
     j.num("vmg", d.vmg);
@@ -278,9 +194,9 @@ std::string BoatState::stateJson() {
     j.endObj();
 
     j.beginObj("water");
-    j.age("stwAge", stwT, now);
+    age(j, "stwAge", stwT, now);
     j.num("stw", stw);
-    j.age("depthAge", depthT, now);
+    age(j, "depthAge", depthT, now);
     j.num("depth", depth, 1);
     j.endObj();
 
@@ -290,7 +206,7 @@ std::string BoatState::stateJson() {
 
 std::string BoatState::aisJson() {
     std::lock_guard lock(mu);
-    auto now = Clock::now();
+    auto now = this->now();
     JsonWriter j;
     j.beginArr();
     for (auto it = ais.begin(); it != ais.end();) {
@@ -326,7 +242,7 @@ std::string BoatState::aisJson() {
 
 std::string BoatState::devicesJson() {
     std::lock_guard lock(mu);
-    auto now = Clock::now();
+    auto now = this->now();
     JsonWriter j;
     j.beginArr();
     for (const auto& [src, dev] : devices) {
@@ -349,12 +265,20 @@ std::string BoatState::devicesJson() {
     return j.out;
 }
 
-void BoatState::sampleHistory() {
+HistorySample BoatState::sampleHistory() {
     std::lock_guard lock(mu);
-    Derived d = derive(Clock::now());
-    bool fresh = windT.fresh(Clock::now());
-    history_.push_back({epochMs(), d.twd * kDeg, d.tws, fresh ? aws : NAN,
-                        cogT.fresh(Clock::now()) ? sog : NAN, d.heel});
+    auto t = now();
+    Derived d = derive(t);
+    HistorySample s{epochMs(), d.twd * kDeg, d.tws, windT.fresh(t) ? aws : NAN,
+                    cogT.fresh(t) ? sog : NAN, d.heel};
+    history_.push_back(s);
+    while (history_.size() > kHistoryLen) history_.pop_front();
+    return s;
+}
+
+void BoatState::setHistory(std::deque<HistorySample> samples) {
+    std::lock_guard lock(mu);
+    history_ = std::move(samples);
     while (history_.size() > kHistoryLen) history_.pop_front();
 }
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -14,7 +15,7 @@ using Clock = std::chrono::steady_clock;
 struct Stamp {
     Clock::time_point t{};
     bool valid() const { return t.time_since_epoch().count() != 0; }
-    void touch() { t = Clock::now(); }
+    void touch(Clock::time_point now) { t = now; }
     double age(Clock::time_point now) const {
         return std::chrono::duration<double>(now - t).count();
     }
@@ -54,12 +55,27 @@ struct Settings {
     bool invertRoll = false;  // flip if the sensor reports heel to the wrong side
 };
 
+// One 1 Hz sample of the history shown in the wind chart.
+struct HistorySample {
+    int64_t t;  // epoch ms
+    double twd, tws, aws, sog, heel;  // deg, m/s, m/s, m/s, deg
+};
+
 // Live boat data. Raw values are in SI units and radians as they come off the bus.
 // All fields are guarded by `mu`.
 class BoatState {
 public:
     std::mutex mu;
     Settings settings;
+
+    // Clock for data ages. Live it is the real clock; when replaying a recording
+    // it is the recording's time, moved along by the player.
+    Clock::time_point now() const {
+        int64_t us = playbackUs_.load();
+        return us < 0 ? Clock::now() : Clock::time_point(std::chrono::microseconds(us));
+    }
+    int64_t epochMs() const;  // the same clock as UTC milliseconds
+    void setPlaybackTime(int64_t epochUs) { playbackUs_ = epochUs; }
 
     // Apparent wind (PGN 130306, reference 2)
     double aws = NAN, awa = NAN;  // m/s, rad (-pi..pi, + = starboard)
@@ -111,8 +127,10 @@ public:
     std::string devicesJson();
     std::string aisJson();  // drops targets not heard for 20 minutes
     std::string historyJson();
-    // Records one history sample; call at 1 Hz.
-    void sampleHistory();
+    // Records one history sample and returns it; call at 1 Hz.
+    HistorySample sampleHistory();
+    // Replaces the history (used when jumping to a point in a recording).
+    void setHistory(std::deque<HistorySample> samples);
 
 private:
     struct Derived {
@@ -128,11 +146,8 @@ private:
     };
     Derived derive(Clock::time_point now);  // caller holds mu
 
-    struct HistorySample {
-        int64_t t;  // epoch ms
-        double twd, tws, aws, sog, heel;
-    };
     std::deque<HistorySample> history_;
+    std::atomic<int64_t> playbackUs_{-1};  // -1: live
 
     uint64_t rateFrames_ = 0;
     Clock::time_point rateT_{};

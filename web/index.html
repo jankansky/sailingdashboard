@@ -20,14 +20,31 @@
     <span class="pill" id="pill-hdg">HDG</span>
     <span class="pill" id="pill-gps">GPS</span>
     <span class="pill" id="pill-att">HEEL</span>
+    <span class="pill rec hidden" id="pill-rec" title="Recording the bus to the Pi's SD card">● REC</span>
+    <span class="pill replay hidden" id="pill-replay">REPLAY</span>
   </div>
   <div class="clock" id="clock">--:--:--</div>
   <div class="buttons">
+    <button id="btn-shot" type="button" class="icon" title="Save a screenshot" aria-label="Save a screenshot">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+    </button>
+    <button id="btn-logs" type="button">Logs</button>
     <button id="btn-bus" type="button">Bus</button>
     <button id="btn-damp" type="button">Damp 1s</button>
     <button id="btn-theme" type="button">Day</button>
   </div>
 </header>
+
+<div id="playbar" class="playbar hidden">
+  <button id="play-toggle" type="button" class="icon" aria-label="Play">▶</button>
+  <button id="play-speed" type="button" title="Replay speed">1×</button>
+  <div class="scrub">
+    <canvas id="play-spark" aria-hidden="true"></canvas>
+    <input id="play-slider" type="range" min="0" max="1" step="1000" value="0" aria-label="Time in recording">
+  </div>
+  <div class="play-time"><span id="play-time">--:--:--</span><span id="play-span"></span></div>
+  <button id="play-live" type="button" title="Stop the replay and show the boat live">Live</button>
+</div>
 
 <div id="error-banner" class="error-banner hidden" role="alert">
   <span></span>
@@ -189,6 +206,22 @@
     </table>
   </form>
 </dialog>
+
+<dialog id="logs-dialog">
+  <form method="dialog">
+    <div class="dialog-head">
+      <h2>Recordings</h2>
+      <button type="submit">Close</button>
+    </div>
+    <p id="logs-summary"></p>
+    <table>
+      <thead><tr><th>Date</th><th>Time</th><th>Length</th><th>Size</th><th></th></tr></thead>
+      <tbody id="logs-rows"></tbody>
+    </table>
+  </form>
+</dialog>
+
+<div id="toast" class="toast hidden" role="status"></div>
 
 <script src="app.js"></script>
 </body>

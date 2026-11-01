@@ -42,6 +42,8 @@ else
         cmake --build build -j\$(nproc)
         sudo install -m 755 build/sailingdashboard /opt/sailingdashboard/
         sudo rsync -a --delete web/ /opt/sailingdashboard/web/
+        sudo install -m 644 deploy/sailingdashboard.service /etc/systemd/system/
+        sudo systemctl daemon-reload
         if [ -d tiles ]; then sudo rsync -a --delete tiles/ /opt/sailingdashboard/tiles/; fi
         sudo systemctl restart sailingdashboard
         systemctl --no-pager --lines=5 status sailingdashboard"

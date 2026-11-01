@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "can_frame.hpp"
 
@@ -21,3 +22,8 @@ std::unique_ptr<FrameSource> makeSlcanSource(const std::string& device);
 std::unique_ptr<FrameSource> makeReplaySource(const std::string& path, bool loop);
 // Simulated boat starting at the given position (degrees).
 std::unique_ptr<FrameSource> makeSimulatorSource(double lat, double lon);
+
+// Parses one line of a candump log: "(1730470000.123456) can0 09F80102#0102..." or
+// "can0  09F80102   [8]  01 02 ...". tsSec is NaN when the line has no timestamp.
+// "imu" lines (see Recorder) become kImuFrameId frames.
+bool parseLogLine(std::string_view line, CanFrame& frame, double& tsSec);

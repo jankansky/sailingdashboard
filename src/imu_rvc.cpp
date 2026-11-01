@@ -3,6 +3,7 @@
 #include <poll.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -49,7 +50,9 @@ bool parse(std::vector<uint8_t>& buf, double& pitchDeg, double& rollDeg) {
 
 }  // namespace
 
-void runImuRvc(const std::string& device, BoatState& state, const std::atomic<bool>& stop) {
+void runImuRvc(const std::string& device, BoatState& state, const std::atomic<bool>& stop,
+               const std::function<void(const CanFrame&)>& record) {
+    auto lastRecord = std::chrono::steady_clock::time_point{};
     while (!stop) {
         int fd = openSerialPort(device);
         if (fd < 0) {
@@ -77,10 +80,27 @@ void runImuRvc(const std::string& device, BoatState& state, const std::atomic<bo
             double pitch, roll;
             if (parse(buf, pitch, roll)) {
                 silentMs = 0;
-                std::lock_guard lock(state.mu);
-                state.imuPitch = pitch * kRad;
-                state.imuRoll = roll * kRad;
-                state.imuT.touch();
+                {
+                    std::lock_guard lock(state.mu);
+                    state.imuPitch = pitch * kRad;
+                    state.imuRoll = roll * kRad;
+                    state.imuT.touch(state.now());
+                }
+                auto now = std::chrono::steady_clock::now();
+                if (record && now - lastRecord >= std::chrono::milliseconds(100)) {
+                    lastRecord = now;
+                    CanFrame f;
+                    f.id = kImuFrameId;
+                    f.len = 4;
+                    auto put = [&](int at, double rad) {
+                        auto v = static_cast<int16_t>(std::lround(std::clamp(rad, -3.2, 3.2) * 1e4));
+                        f.data[at] = static_cast<uint8_t>(v & 0xFF);
+                        f.data[at + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+                    };
+                    put(0, pitch * kRad);
+                    put(2, roll * kRad);
+                    record(f);
+                }
             }
             if (buf.size() > 4096) buf.clear();
         }

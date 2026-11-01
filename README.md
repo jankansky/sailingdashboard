@@ -207,6 +207,35 @@ Edit `/etc/default/sailingdashboard`, then `sudo systemctl restart sailingdashbo
     positions at the closest approach. The simulator includes four fictional AIS vessels.
   - It runs on Three.js, saved in `web/vendor/` so it works without internet.
 - **Header**: status pills turn amber or red when a sensor goes quiet. **Damp** sets the smoothing. **Day/Dusk/Night** switches themes (Night is red-only).
+- **Screenshot** (camera button): saves a PNG of the whole dashboard, including the 3D view, to the
+  tablet's downloads. It's named after the time shown, e.g. `potter19-2026-07-04-143210.png`.
+
+## Recordings and replay
+
+The Pi records everything on the bus, plus the BNO085 readings, to its SD card in
+`/var/lib/sailingdashboard/recordings`. **REC** in the header lights red while it's writing.
+
+- **Files:** one per outing. A new file starts when the Pi powers up, after the bus has been quiet for
+  10 minutes, or every 12 hours.
+- **Space:** about 15–40 MB per hour, depending on how busy the bus is. The oldest recordings are deleted
+  beyond 8 GB, or when the card gets down to 1 GB free. Change the limit in `/etc/default/sailingdashboard`.
+- **Format:** candump, so recordings also open in other NMEA 2000 tools (e.g. canboat's `analyzer`) and in
+  `--replay`.
+- **Power:** data reaches the card every 10 seconds, so switching the boat off loses at most the last few seconds.
+
+Tap **Logs** to list the recordings, download one, or **Replay** it. A replay bar appears:
+
+- **▶ / ❚❚** plays and pauses. The speed button cycles through 1×, 2×, 5×, 10×, 30× and 60×.
+- **Drag the slider** to move through time. The shading behind it is boat speed across the whole
+  recording, to help find the interesting parts. On a keyboard, Space plays or pauses, and ← / → step
+  10 s (with Shift, 1 min).
+- **Live** returns to the boat.
+
+Everything follows the replay: instruments, wind chart, 3D view, sun and moon, and AIS targets.
+Each tablet replays on its own, so the helm's tablet can stay live while someone else reviews.
+The Pi's clock dates the files. With a PiCAN3, its battery-backed clock keeps time with the Pi
+offline. Without one, recording dates may be off until the Pi next sees the internet, but
+replay times come from the boat's GPS.
 
 ## Development (Mac or Linux, no hardware)
 
@@ -216,6 +245,10 @@ cmake -S . -B build && cmake --build build
 ./build/sailingdashboard --sim-at casco --port 8080  # or start it in Casco Bay (or --sim-at LAT,LON)
 open http://localhost:8080/
 ```
+
+Add `--record recordings` to record the simulator and try the Logs button. Use
+`--recordings DIR` to replay recordings copied from the Pi without recording, e.g.
+`scp -r pi@sailboat.local:/var/lib/sailingdashboard/recordings .`.
 
 In CLion, set the run configuration's program arguments to `--sim --port 8080` and its
 working directory to the project root, so `web/` is found.
@@ -238,11 +271,15 @@ src/frame_source.*   SocketCAN, SLCAN serial, candump replay
 src/simulator.cpp    simulated boat producing real N2K frames
 src/imu_rvc.*        BNO085 UART-RVC reader (heel/pitch)
 src/http_server.*    static files + Server-Sent Events (/events) + /api/*
+src/recorder.*       logs the bus to the SD card
+src/playback.*       replays a recording at any speed and position, one session per tablet
+src/json.hpp         small JSON writer
 web/                 tablet UI (works offline; boat3d.js is the 3D view)
 web/vendor/          Three.js r160 (MIT licence)
 web/maptiles.js      offline map tiles in the 3D view
 web/ais3d.js         AIS targets, predicted tracks and closest-approach warnings
 web/sky.js, astro.js sky, sun and moon (skymodel.js: Three.js's Preetham sky shader, modified)
+web/screenshot.js    redraws the page into an image for the screenshot button
 tools/fetch_tiles.py downloads imagery and NOAA chart tiles for offline use
 deploy/              installer, push-to-Pi script, udev rule, systemd service
 ```

@@ -632,9 +632,10 @@ export function createBoatView(container) {
   const forestayAxis = rig.forestay;
 
   return {
-    // s: { hdg, awa, twa, cog, heel, pitch, lat, lon, utc, sog, cogTrue, trim: {main, jib, side, luffing} };
+    // s: { hdg, awa, twa, cog, heel, pitch, lat, lon, utc, sog, cogTrue, trim: {main, jib, side, luffing}, ais };
     // (cog is smoothed for display; sog and cogTrue are the raw GPS values in m/s and degrees)
-    // angles in degrees, utc in ms.
+    // angles in degrees, utc in ms; ais: where to get targets (see AisLayer.update).
+    // Renders before returning, so the canvas can be copied right after.
     update(s) {
       const hdg = Number.isFinite(s.hdg) ? s.hdg : 0;
       boat.rotation.set((s.pitch || 0) * DEG, -hdg * DEG, -(s.heel || 0) * DEG);
@@ -668,7 +669,7 @@ export function createBoatView(container) {
       camera.lookAt(target);
       camera.updateMatrixWorld();
       map?.update(s.lat, s.lon, camera, renderer.domElement.height);
-      ais.update({ lat: s.lat, lon: s.lon, sog: s.sog, cog: s.cogTrue }, cam.distance);
+      ais.update({ lat: s.lat, lon: s.lon, sog: s.sog, cog: s.cogTrue }, cam.distance, s.ais);
 
       // Sun and moon for the GPS time (or this device's clock) at the boat.
       if (Number.isFinite(s.lat) && Number.isFinite(s.lon)) lastFix = { lat: s.lat, lon: s.lon };
@@ -693,6 +694,7 @@ export function createBoatView(container) {
       renderer.clearDepth();
       renderer.render(scene, camera);
     },
+    canvas: renderer.domElement,
     setFollow(on) { follow = on; },
     // Resolves to the map layers available offline, e.g. ['imagery', 'chart'].
     mapLayers() { return mapReady; },

@@ -5,8 +5,10 @@
 #include <poll.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -259,50 +261,17 @@ private:
         while (std::getline(in_, line)) {
             ++lineNo_;
             CanFrame f;
-            std::optional<double> ts;
-            if (!parse(line, f, ts)) continue;
+            double ts;
+            if (!parseLogLine(line, f, ts)) continue;
             auto due = start_ + std::chrono::milliseconds(5 * lineNo_);
-            if (ts) {
-                if (!firstTs_) firstTs_ = *ts;
-                due = start_ + std::chrono::microseconds(static_cast<int64_t>((*ts - *firstTs_) * 1e6));
+            if (std::isfinite(ts)) {
+                if (!firstTs_) firstTs_ = ts;
+                due = start_ + std::chrono::microseconds(static_cast<int64_t>((ts - *firstTs_) * 1e6));
             }
             pending_ = Pending{f, due};
             return true;
         }
         return false;
-    }
-
-    static bool parse(const std::string& line, CanFrame& f, std::optional<double>& ts) {
-        std::istringstream ss(line);
-        std::string tok;
-        if (!(ss >> tok)) return false;
-        if (tok.front() == '(') {
-            ts = std::strtod(tok.c_str() + 1, nullptr);
-            std::string iface, frame;
-            if (!(ss >> iface >> frame)) return false;
-            auto hash = frame.find('#');
-            if (hash == std::string::npos || hash > 8) return false;
-            uint32_t id;
-            if (!parseHex(frame.data(), hash, id)) return false;
-            f.id = id & 0x1FFFFFFF;
-            return parseHexBytes(frame.substr(hash + 1), f);
-        }
-        // tok is the interface name
-        std::string idStr, lenStr;
-        if (!(ss >> idStr >> lenStr) || idStr.size() > 8 || lenStr.size() < 3 || lenStr[0] != '[') return false;
-        uint32_t id;
-        if (!parseHex(idStr.data(), idStr.size(), id)) return false;
-        f.id = id & 0x1FFFFFFF;
-        int len = std::atoi(lenStr.c_str() + 1);
-        if (len < 0 || len > 8) return false;
-        f.len = static_cast<uint8_t>(len);
-        for (int i = 0; i < len; ++i) {
-            std::string b;
-            uint32_t v;
-            if (!(ss >> b) || b.size() != 2 || !parseHex(b.data(), 2, v)) return false;
-            f.data[i] = static_cast<uint8_t>(v);
-        }
-        return true;
     }
 
     std::string path_;
@@ -346,4 +315,61 @@ std::unique_ptr<FrameSource> makeSlcanSource(const std::string& device) {
 
 std::unique_ptr<FrameSource> makeReplaySource(const std::string& path, bool loop) {
     return std::make_unique<ReplaySource>(path, loop);
+}
+
+bool parseLogLine(std::string_view line, CanFrame& f, double& tsSec) {
+    tsSec = NAN;
+    f = CanFrame{};
+    size_t pos = 0;
+    // Next whitespace-separated token.
+    auto token = [&]() -> std::string_view {
+        while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
+        size_t start = pos;
+        while (pos < line.size() && line[pos] != ' ' && line[pos] != '\t' && line[pos] != '\r' &&
+               line[pos] != '\n')
+            ++pos;
+        return line.substr(start, pos - start);
+    };
+    std::string_view tok = token();
+    if (tok.empty()) return false;
+    if (tok.front() == '(') {
+        char buf[32];
+        size_t n = std::min(tok.size() - 1, sizeof buf - 1);
+        std::memcpy(buf, tok.data() + 1, n);
+        buf[n] = 0;
+        char* end;
+        tsSec = std::strtod(buf, &end);
+        if (end == buf) return false;
+        std::string_view iface = token(), frame = token();
+        auto hash = frame.find('#');
+        if (hash == std::string_view::npos || hash > 8) return false;
+        uint32_t id;
+        if (!parseHex(frame.data(), hash, id)) return false;
+        std::string_view bytes = frame.substr(hash + 1);
+        if (bytes.size() % 2 || bytes.size() > 16) return false;
+        f.len = static_cast<uint8_t>(bytes.size() / 2);
+        for (size_t i = 0; i < f.len; ++i) {
+            uint32_t b;
+            if (!parseHex(bytes.data() + 2 * i, 2, b)) return false;
+            f.data[i] = static_cast<uint8_t>(b);
+        }
+        f.id = iface == "imu" ? kImuFrameId : id & 0x1FFFFFFF;
+        return true;
+    }
+    // tok is the interface name
+    std::string_view idStr = token(), lenStr = token();
+    if (idStr.empty() || idStr.size() > 8 || lenStr.size() < 3 || lenStr[0] != '[') return false;
+    uint32_t id;
+    if (!parseHex(idStr.data(), idStr.size(), id)) return false;
+    int len = lenStr[1] - '0';
+    if (len < 0 || len > 8) return false;
+    f.len = static_cast<uint8_t>(len);
+    for (int i = 0; i < len; ++i) {
+        std::string_view b = token();
+        uint32_t v;
+        if (b.size() != 2 || !parseHex(b.data(), 2, v)) return false;
+        f.data[i] = static_cast<uint8_t>(v);
+    }
+    f.id = tok == "imu" ? kImuFrameId : id & 0x1FFFFFFF;
+    return true;
 }
