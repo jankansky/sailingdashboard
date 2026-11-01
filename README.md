@@ -197,6 +197,17 @@ Edit `/etc/default/sailingdashboard`, then `sudo systemctl restart sailingdashbo
 
 ## The display
 
+- **Boat**: tap the boat's name at the top left to choose what's drawn in the 2D and 3D views.
+  Each tablet remembers its own choice. The options are:
+  - **Popular boats**: ILCA 7 (Laser), Hobie 16, Potter 19, Catalina 22, J/24, Catalina 30 and
+    Beneteau Oceanis 38.1. Each is drawn from its published length, beam, draft and rig sizes, with
+    approximate hull lines and deck layout.
+  - **Generic** sloop, ketch, catamaran and trimaran, with a slider for length (4–25 m). Catamarans
+    under 8 m are beach cats with a trampoline; longer ones have a bridge deck and deckhouse.
+
+  The Potter 19 keeps its own paint: blue hull, white pinstripe, green "974" on the main and a
+  striped jib. To add a boat, add an entry to `web/boats.js`.
+
 - **Compass rose (heading up)**: the outer card rotates with heading.
   - **Blue solid triangle**: true wind direction.
   - **Hollow triangle**: 10-minute average wind direction. When the solid one moves away from it, that's a lift or a header.
@@ -298,6 +309,7 @@ web/maptiles.js      offline map tiles in the 3D view
 web/ais3d.js         AIS targets, predicted tracks and closest-approach warnings
 web/sky.js, astro.js sky, sun and moon (skymodel.js: Three.js's Preetham sky shader, modified)
 web/screenshot.js    redraws the page into an image for the screenshot button
+web/boats.js         boat catalog: dimensions → hull lines, rig, layout; 2D plan and stern views
 tools/fetch_tiles.py downloads imagery and NOAA chart tiles for offline use
 deploy/              installer, push-to-Pi script, udev rule, systemd service
 ```

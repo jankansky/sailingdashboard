@@ -1,4 +1,4 @@
-// 3D view of the West Wight Potter 19. Loaded on demand by app.js.
+// 3D view of the boat (see boats.js for the boats). Loaded on demand by app.js.
 //
 // World axes: +X east, +Y up, -Z north; 1 unit = 1 metre; waterline at y = 0.
 // Boat axes:  +X starboard, +Y up, -Z toward the bow.
@@ -9,35 +9,7 @@ import { MapTiles, loadTileIndex } from './maptiles.js';
 import { HAZE_DENSITY, SKY_EXPOSURE, SkyDome, smooth } from './sky.js';
 
 const DEG = Math.PI / 180;
-
-// Hard-chine hull stations from stem to transom (approximate Potter 19 lines:
-// LOA 5.72 m, beam 2.29 m). Each row: z, sheer half-breadth, sheer height,
-// chine half-breadth, chine height, keel height.
-const STATIONS = [
-  [-2.86, 0.00, 0.86, 0.00, 0.50, 0.42],
-  [-2.40, 0.48, 0.80, 0.30, 0.22, 0.02],
-  [-1.70, 0.86, 0.73, 0.68, 0.06, -0.14],
-  [-0.80, 1.08, 0.67, 0.92, 0.00, -0.21],
-  [0.20, 1.14, 0.62, 1.00, -0.01, -0.22],
-  [1.30, 1.10, 0.59, 0.99, 0.00, -0.17],
-  [2.86, 0.98, 0.57, 0.90, 0.06, -0.02],
-];
-
-const MAST_Z = -0.86;
-const CABIN_TOP = 0.98;
-const GOOSENECK = 1.40;
-const MAST_TOP = 6.60;
-const HOUNDS = 5.85;  // fractional rig: forestay and shrouds meet the mast here
-const TACK = new THREE.Vector3(0, 0.88, -2.80);
-
-function deckY(z) {
-  for (let i = 0; i < STATIONS.length - 1; i++) {
-    const [z0, , y0] = STATIONS[i];
-    const [z1, , y1] = STATIONS[i + 1];
-    if (z >= z0 && z <= z1) return y0 + (y1 - y0) * (z - z0) / (z1 - z0);
-  }
-  return STATIONS.at(-1)[2];
-}
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 function geometry(positions) {
   const g = new THREE.BufferGeometry();
@@ -50,108 +22,76 @@ function quad(out, a, b, c, d) {
   out.push(...a, ...b, ...c, ...a, ...c, ...d);
 }
 
-// Paint scheme: blue topsides with a white pinstripe below the sheer, black
-// bottom paint up to just above the waterline.
-const PINSTRIPE = [0.15, 0.20];  // fraction of the way from sheer down to chine
-const BOOT_TOP = 0.06;  // bottom paint reaches this height (m above the waterline)
-
-// Stations interpolated in between, so the paint lines follow the hull smoothly.
-function fineStations(steps = 8) {
-  const out = [];
-  for (let i = 0; i < STATIONS.length - 1; i++) {
-    for (let k = 0; k < steps; k++) {
-      out.push(STATIONS[i].map((v, c) => v + (STATIONS[i + 1][c] - v) * k / steps));
-    }
-  }
-  out.push(STATIONS.at(-1));
-  return out;
-}
-
-// Fraction along a panel edge (top height -> bottom height) where it crosses `y`.
-function crossing(yTop, yBot, y, lo) {
-  return Math.min(1, Math.max(lo, (yTop - y) / (yTop - yBot)));
-}
-
 const lerp3 = (a, b, f) => a.map((v, i) => v + (b[i] - v) * f);
 
-// Adds a panel between two edges, split into colour bands. levels(st) gives
-// the band boundaries (0 = top edge, 1 = bottom edge) at a station.
-function bandedPanel(bins, stations, top, bottom, levels, colors) {
-  for (let i = 0; i < stations.length - 1; i++) {
-    const a = stations[i], b = stations[i + 1];
-    const la = levels(a), lb = levels(b);
-    colors.forEach((color, k) => {
-      quad(bins[color],
-        lerp3(top(a), bottom(a), la[k]), lerp3(top(a), bottom(a), la[k + 1]),
-        lerp3(top(b), bottom(b), lb[k + 1]), lerp3(top(b), bottom(b), lb[k]));
-    });
-  }
+// Fraction along an edge (top height -> bottom height) where it crosses `y`.
+function crossing(yTop, yBot, y) {
+  const d = yTop - yBot;
+  if (Math.abs(d) < 1e-6) return y >= yTop ? 0 : 1;
+  return clamp((yTop - y) / d, 0, 1);
 }
 
-function buildHull(mats) {
-  const bins = { blue: [], white: [], black: [] };
-  const deck = [];
-  const st = fineStations();
-  const topsideLevels = s => {
-    const boot = Math.max(PINSTRIPE[1], crossing(s[2], s[4], BOOT_TOP, PINSTRIPE[1]));
-    return [0, PINSTRIPE[0], PINSTRIPE[1], boot, 1];
-  };
-  const topsideColors = ['blue', 'white', 'blue', 'black'];
-  for (const side of [1, -1]) {
-    const sheer = s => [side * s[1], s[2], s[0]];
-    const chine = s => [side * s[3], s[4], s[0]];
-    const keel = s => [0, s[5], s[0]];
-    bandedPanel(bins, st, sheer, chine, topsideLevels, topsideColors);
-    bandedPanel(bins, st, chine, keel, s => [0, crossing(s[4], s[5], BOOT_TOP, 0), 1], ['blue', 'black']);
-  }
-  for (let i = 0; i < STATIONS.length - 1; i++) {
-    const s = STATIONS[i], t = STATIONS[i + 1];
-    quad(deck, [-s[1], s[2], s[0]], [s[1], s[2], s[0]], [t[1], t[2], t[0]], [-t[1], t[2], t[0]]);
-  }
+// Paint bands down each strip of the hull: topsides, stripe, topsides, bottom paint.
+const BANDS = ['hull', 'stripe', 'hull', 'bottom'];
 
-  // Transom: the same bands across, then the bottom-painted vee below the chines.
-  const tr = STATIONS.at(-1);
-  const [z, sb, sy, cb, cy, ky] = tr;
-  const lv = topsideLevels(tr);
-  topsideColors.forEach((color, k) => {
-    const at = (x, f) => lerp3([x * sb, sy, z], [x * cb, cy, z], f);
-    quad(bins[color], at(-1, lv[k]), at(1, lv[k]), at(1, lv[k + 1]), at(-1, lv[k + 1]));
-  });
-  bins.black.push(-cb, cy, z, cb, cy, z, 0, ky, z);
+// Band boundaries (0 = top edge .. 1 = bottom edge) on the strip between points
+// k and k+1 of a section. The stripe is only on the topsides (k = 0).
+function cuts(boat, sec, k) {
+  const boot = crossing(sec.pts[k][1], sec.pts[k + 1][1], boat.bootTop ?? 0.06);
+  const [s0, s1] = k === 0 && boat.stripe ? boat.stripe : [0, 0];
+  const a = Math.min(s0, boot), b = Math.min(Math.max(s1, a), boot);
+  return [0, a, b, boot, 1];
+}
+
+function buildHull(boat, hull, mats) {
+  const bins = { hull: [], stripe: [], bottom: [] };
+  const deck = [];
+  const st = hull.sections, K = st[0].pts.length;
+  const P = (sec, k, side) => [hull.x + side * sec.pts[k][0], sec.pts[k][1], sec.z];
+  const band = (a0, a1, b0, b1, ca, cb) => {
+    for (let j = 0; j < 4; j++) {
+      if (ca[j + 1] - ca[j] < 1e-6 && cb[j + 1] - cb[j] < 1e-6) continue;
+      quad(bins[BANDS[j]], lerp3(a0, a1, ca[j]), lerp3(a0, a1, ca[j + 1]), lerp3(b0, b1, cb[j + 1]), lerp3(b0, b1, cb[j]));
+    }
+  };
+  for (const side of [1, -1]) {
+    for (let k = 0; k < K - 1; k++) {
+      for (let i = 0; i < st.length - 1; i++) {
+        const a = st[i], b = st[i + 1];
+        band(P(a, k, side), P(a, k + 1, side), P(b, k, side), P(b, k + 1, side), cuts(boat, a, k), cuts(boat, b, k));
+      }
+    }
+  }
+  for (let i = 0; i < st.length - 1; i++) {
+    const a = st[i], b = st[i + 1];
+    quad(deck, P(a, 0, -1), P(a, 0, 1), P(b, 0, 1), P(b, 0, -1));
+  }
+  // Transom: the same bands straight across.
+  const t = st.at(-1);
+  for (let k = 0; k < K - 1; k++) {
+    const c = cuts(boat, t, k);
+    band(P(t, k, -1), P(t, k + 1, -1), P(t, k, 1), P(t, k + 1, 1), c, c);
+  }
 
   const g = new THREE.Group();
-  g.add(new THREE.Mesh(geometry(bins.blue), mats.hullBlue));
-  g.add(new THREE.Mesh(geometry(bins.white), mats.pinstripe));
-  g.add(new THREE.Mesh(geometry(bins.black), mats.bottom));
+  g.add(new THREE.Mesh(geometry(bins.hull), mats.hull));
+  if (bins.stripe.length) g.add(new THREE.Mesh(geometry(bins.stripe), mats.stripe));
+  if (bins.bottom.length) g.add(new THREE.Mesh(geometry(bins.bottom), mats.bottom));
   g.add(new THREE.Mesh(geometry(deck), mats.deck));
   return g;
 }
 
-function buildCabin(mats) {
-  // Trunk cabin with a pop-top, narrower at the front.
-  const fz = -1.75, rz = 0.35;
-  const fb = [0.55, deckY(fz) - 0.02, fz], rb = [0.72, deckY(rz) - 0.02, rz];
-  const ft = [0.46, CABIN_TOP, fz + 0.18], rt = [0.62, CABIN_TOP, rz];
+// A deckhouse narrowing to its roof: base half-widths w0 (front) and w1 (back).
+function trunk(z0, z1, y0, y1, top, w0, w1, inset, mat) {
+  const fb = [w0, y0, z0], rb = [w1, y1, z1];
+  const ft = [w0 - inset, top, z0 + 2 * inset], rt = [w1 - inset, top, z1];
   const p = (v, side) => [side * v[0], v[1], v[2]];
   const out = [];
   quad(out, p(ft, -1), p(ft, 1), p(rt, 1), p(rt, -1));  // roof
   quad(out, p(fb, -1), p(fb, 1), p(ft, 1), p(ft, -1));  // front
   quad(out, p(rb, -1), p(rb, 1), p(rt, 1), p(rt, -1));  // back
   for (const s of [1, -1]) quad(out, p(fb, s), p(rb, s), p(rt, s), p(ft, s));  // sides
-  const g = new THREE.Group();
-  g.add(new THREE.Mesh(geometry(out), mats.cabin));
-
-  const popTop = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.06, 0.95), mats.deck);
-  popTop.position.set(0, CABIN_TOP + 0.03, -0.15);
-  g.add(popTop);
-
-  // Cockpit well, just above the deck surface.
-  const cz0 = 0.45, cz1 = 2.70, cw = 0.78;
-  const well = [];
-  quad(well, [-cw, deckY(cz0) + 0.01, cz0], [cw, deckY(cz0) + 0.01, cz0],
-    [cw, deckY(cz1) + 0.01, cz1], [-cw, deckY(cz1) + 0.01, cz1]);
-  g.add(new THREE.Mesh(geometry(well), mats.cockpit));
-  return g;
+  return new THREE.Mesh(geometry(out), mat);
 }
 
 function box(w, h, d, mat, x, y, z) {
@@ -164,8 +104,101 @@ function cylinder(r0, r1, len, mat) {
   return new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, len, 12), mat);
 }
 
+// A spar or beam between two points.
+function strut(a, b, r, mat) {
+  const from = new THREE.Vector3(...a), to = new THREE.Vector3(...b);
+  const m = cylinder(r, r, from.distanceTo(to), mat);
+  m.position.copy(from).add(to).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.clone().sub(from).normalize());
+  return m;
+}
+
 function line(points, mat) {
   return new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), mat);
+}
+
+function buildDeck(boat, mats) {
+  const g = new THREE.Group(), geo = boat.geo, L = boat.loa;
+  const c = boat.cabin;
+  if (c) {
+    const inset = c.inset ?? clamp(0.35 * (c.top - geo.deckAt(c.z1)), 0.05, 0.25);
+    g.add(trunk(c.z0, c.z1, geo.deckAt(c.z0) - 0.02, geo.deckAt(c.z1) - 0.02, c.top, c.w0, c.w1, inset, mats.cabin));
+    if (c.popTop) g.add(box(c.popTop.w, 0.06, c.popTop.d, mats.deck, 0, c.top + 0.03, c.popTop.z));
+  }
+  const cp = boat.cockpit;
+  if (cp && !cp.deck) {  // cockpit well, just above the deck surface
+    const well = [];
+    quad(well, [-cp.w, geo.deckAt(cp.z0) + 0.01, cp.z0], [cp.w, geo.deckAt(cp.z0) + 0.01, cp.z0],
+      [cp.w, geo.deckAt(cp.z1) + 0.01, cp.z1], [-cp.w, geo.deckAt(cp.z1) + 0.01, cp.z1]);
+    g.add(new THREE.Mesh(geometry(well), mats.cockpit));
+  }
+  // Multihulls: bridge deck and deckhouse, or trampolines on crossbeams.
+  if (boat.bridge) {
+    const b = boat.bridge, w = 2 * geo.sideX, d = b.z1 - b.z0;
+    g.add(box(w, b.top - b.bottom, d, mats.hull, 0, (b.top + b.bottom) / 2, (b.z0 + b.z1) / 2));
+    g.add(box(w * 0.98, 0.02, d * 0.99, mats.deck, 0, b.top + 0.01, (b.z0 + b.z1) / 2));
+  }
+  if (boat.house) {
+    const h = boat.house;
+    g.add(trunk(h.z0, h.z1, boat.bridge.top, boat.bridge.top, h.top, h.w, h.w, 0.12 * (h.top - boat.bridge.top), mats.cabin));
+  }
+  const beamR = 0.008 * L + 0.03;
+  for (const b of boat.beams || []) g.add(strut([-geo.sideX, b.y, b.z], [geo.sideX, b.y, b.z], beamR, mats.spar));
+  if (boat.tramp) {
+    const t = boat.tramp, mid = (t.z0 + t.z1) / 2;
+    const outer = geo.sideX - 0.6 * geo.sideHalfAt(mid);
+    const spans = t.inner ? [[0.8 * geo.halfAt(mid), outer]] : [[-outer, outer]];
+    for (const [x0, x1] of spans) {
+      for (const side of t.inner ? [1, -1] : [1]) {
+        const net = new THREE.Mesh(new THREE.PlaneGeometry(Math.abs(x1 - x0), t.z1 - t.z0), mats.tramp);
+        net.rotation.x = -Math.PI / 2;
+        net.position.set(side * (x0 + x1) / 2, t.y, mid);
+        g.add(net);
+      }
+    }
+  }
+  return g;
+}
+
+// Keel, boards and rudders: a tapered slab from `top` to `bottom`, root chord
+// z0..z1, tip chord `tip` set back by `sweep`, optional bulb at the bottom.
+function buildFoil(f, mats) {
+  const g = new THREE.Group();
+  const x = f.x ?? 0, t = (f.thick ?? 0.03) / 2;
+  const tip = f.tip ?? f.z1 - f.z0, sweep = f.sweep ?? 0;
+  const r0 = f.z0, r1 = f.z1, t0 = f.z0 + sweep, t1 = t0 + tip;
+  const v = (z, y, side) => [x + side * t, y, z];
+  const out = [];
+  for (const s of [1, -1]) quad(out, v(r0, f.top, s), v(r1, f.top, s), v(t1, f.bottom, s), v(t0, f.bottom, s));
+  quad(out, v(r0, f.top, -1), v(r0, f.top, 1), v(t0, f.bottom, 1), v(t0, f.bottom, -1));  // leading edge
+  quad(out, v(r1, f.top, -1), v(r1, f.top, 1), v(t1, f.bottom, 1), v(t1, f.bottom, -1));  // trailing edge
+  quad(out, v(t0, f.bottom, -1), v(t0, f.bottom, 1), v(t1, f.bottom, 1), v(t1, f.bottom, -1));
+  g.add(new THREE.Mesh(geometry(out), mats.foil));
+  if (f.bulb) {
+    const b = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), mats.foil);
+    b.scale.set(f.bulb.r, f.bulb.r * 0.8, f.bulb.length / 2);
+    b.position.set(x, f.bottom, (t0 + t1) / 2 + f.bulb.length * 0.12);
+    g.add(b);
+  }
+  return g;
+}
+
+function buildFittings(boat, mats) {
+  const g = new THREE.Group(), geo = boat.geo;
+  for (const f of boat.foils || []) g.add(buildFoil(f, mats));
+  const h = boat.helm;
+  if (h?.type === 'tiller') g.add(box(0.05, 0.05, h.length, mats.foil, 0, h.y, h.z));
+  if (h?.type === 'wheel') {
+    const wheel = new THREE.Mesh(new THREE.TorusGeometry(h.r, 0.025, 8, 32), mats.spar);
+    wheel.position.set(0, h.y + h.r + 0.12, h.z);
+    g.add(wheel, box(0.08, h.r + 0.12, 0.08, mats.spar, 0, h.y + (h.r + 0.12) / 2, h.z + 0.05));
+  }
+  if (boat.outboard) {  // on a transom bracket
+    const o = boat.outboard, y = geo.deckAt(geo.stern);
+    g.add(box(0.30, 0.42, 0.40, mats.outboard, o.x, y + 0.05, o.z));
+    g.add(box(0.08, y + 0.3, 0.12, mats.outboard, o.x, (y - 0.3) / 2 - 0.13, o.z + 0.02));
+  }
+  return g;
 }
 
 // Sail surface between luff (tack -> head) and foot (tack -> clew). Camber is
@@ -222,120 +255,146 @@ function canvasTexture(width, height, draw) {
   return tex;
 }
 
-const SAIL_WHITE = '#fbfbf8';
-const SAIL_NUMBER = '974';
-const SAIL_NUMBER_GREEN = '#178a3c';
-const JIB_BLUE = '#1f5fbf';
-
-// Mainsail texture for one side. Numbers sit near the top of the leech,
-// starboard slightly higher than port as on real sails. `mirrored` draws the
-// glyphs reversed for the side seen through the back of the texture.
-function mainTexture(zSpan, ySpan, clewZ, tackY, headY, centreY, mirrored) {
+// Sail cloth for one side of a sail, in the sail's plane (z aft, y up, metres).
+//   style: { stripes: [colours], angle (degrees the bands rise aft), number, numberColor }
+//   corners: [[z, y] tack, head, clew]; numberY: height of the number's centre
+//   mirrored: drawn for the side seen through the back of the texture, so the
+//   number reads correctly from there.
+function sailTexture(zSpan, ySpan, base, style, corners, numberY, mirrored) {
   const W = 512, H = 1024, sx = W / zSpan, sy = H / ySpan;
   return canvasTexture(W, H, ctx => {
-    ctx.fillStyle = SAIL_WHITE;
+    ctx.fillStyle = base;
     ctx.fillRect(0, 0, W, H);
-    const h = 0.30;  // number height, metres
-    const top = centreY + h / 2;
-    const leechZ = clewZ * (1 - (top - tackY) / (headY - tackY));  // leech at the number's top
-    ctx.save();
-    ctx.translate((leechZ - 0.07) * sx, H - centreY * sy);
-    ctx.scale((mirrored ? -1 : 1) * sx / sy, 1);  // undo the canvas's non-square metres
-    ctx.font = `bold ${Math.round(h * sy)}px Helvetica, Arial, sans-serif`;
-    ctx.textAlign = mirrored ? 'left' : 'right';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = SAIL_NUMBER_GREEN;
-    ctx.fillText(SAIL_NUMBER, 0, 0);
-    ctx.restore();
+    if (style?.stripes?.length) {
+      const a = (style.angle ?? 0) * DEG, n = style.stripes.length;
+      const across = (z, y) => y * Math.cos(a) - z * Math.sin(a);  // distance across the bands
+      const values = corners.map(([z, y]) => across(z, y));
+      const lo = Math.min(...values), hi = Math.max(...values);
+      style.stripes.forEach((color, i) => {
+        const s0 = lo + (hi - lo) * i / n - (i === 0 ? 1 : 0);
+        const s1 = lo + (hi - lo) * (i + 1) / n + (i === n - 1 ? 1 : 0);
+        const pt = (z, s) => [z * sx, H - ((s + z * Math.sin(a)) / Math.cos(a)) * sy];
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        [pt(-1, s0), pt(zSpan + 1, s0), pt(zSpan + 1, s1), pt(-1, s1)]
+          .forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        ctx.fill();
+      });
+    }
+    if (style?.number) {
+      // Near the top of the leech, as on real sails.
+      const [[, tackY], [, headY], [clewZ]] = corners;
+      const h = 0.06 * (headY - tackY);  // number height, metres
+      const top = numberY + h / 2;
+      const leechZ = clewZ * (1 - (top - tackY) / (headY - tackY));
+      ctx.save();
+      ctx.translate((leechZ - 0.07) * sx, H - numberY * sy);
+      ctx.scale((mirrored ? -1 : 1) * sx / sy, 1);  // undo the canvas's non-square metres
+      ctx.font = `bold ${Math.round(h * sy)}px Helvetica, Arial, sans-serif`;
+      ctx.textAlign = mirrored ? 'left' : 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = style.numberColor || '#1a1a1a';
+      ctx.fillText(style.number, 0, 0);
+      ctx.restore();
+    }
   });
 }
 
-// Jib: three blue and two white bands, rising aft at 20 degrees to the hull.
-function jibTexture(zSpan, ySpan, corners) {
-  const W = 512, H = 1024, sx = W / zSpan, sy = H / ySpan;
-  const a = 20 * DEG;
-  const across = (z, y) => y * Math.cos(a) - z * Math.sin(a);  // distance across the stripes
-  const values = corners.map(([z, y]) => across(z, y));
-  const lo = Math.min(...values), hi = Math.max(...values);
-  return canvasTexture(W, H, ctx => {
-    ['blue', 'white', 'blue', 'white', 'blue'].forEach((band, i) => {
-      const s0 = lo + (hi - lo) * i / 5 - (i === 0 ? 1 : 0);
-      const s1 = lo + (hi - lo) * (i + 1) / 5 + (i === 4 ? 1 : 0);
-      const pt = (z, s) => [z * sx, H - ((s + z * Math.sin(a)) / Math.cos(a)) * sy];
-      ctx.fillStyle = band === 'blue' ? JIB_BLUE : SAIL_WHITE;
-      ctx.beginPath();
-      [pt(-1, s0), pt(zSpan + 1, s0), pt(zSpan + 1, s1), pt(-1, s1)]
-        .forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-      ctx.fill();
-    });
-  });
-}
-
-function buildRig(mats) {
-  const rig = new THREE.Group();
-
-  const mast = cylinder(0.045, 0.06, MAST_TOP - CABIN_TOP, mats.spar);
-  mast.position.set(0, (MAST_TOP + CABIN_TOP) / 2, MAST_Z);
-  rig.add(mast);
-
-  const hounds = new THREE.Vector3(0, HOUNDS, MAST_Z);
-  rig.add(line([TACK, hounds], mats.wire));
-  rig.add(line([new THREE.Vector3(1.05, deckY(MAST_Z), MAST_Z), hounds], mats.wire));
-  rig.add(line([new THREE.Vector3(-1.05, deckY(MAST_Z), MAST_Z), hounds], mats.wire));
-  rig.add(line([new THREE.Vector3(0, MAST_TOP, MAST_Z), new THREE.Vector3(0, deckY(2.8), 2.8)], mats.wire));
-
-  // Main: pivots about the mast.
-  const main = new THREE.Group();
-  main.position.set(0, GOOSENECK, MAST_Z);
-  const boom = cylinder(0.04, 0.04, 2.25, mats.spar);
+// A mast with its boom and sail (main or mizzen); the sail group pivots about the mast.
+function buildMast(m, style, base, mats, rig) {
+  const r = clamp(0.0075 * m.mastTop, 0.03, 0.16);
+  rig.add(strut([0, m.mastBase, m.mastZ], [0, m.mastTop, m.mastZ], r, mats.spar));
+  const sail = new THREE.Group();
+  sail.position.set(0, m.gooseneck, m.mastZ);
+  const boom = cylinder(r * 0.8, r * 0.8, m.boom, mats.spar);
   boom.rotation.x = Math.PI / 2;
-  boom.position.z = 1.125;
-  main.add(boom);
-  const mTack = new THREE.Vector3(0, 0.05, 0.03), mClew = new THREE.Vector3(0, 0.05, 2.2);
-  const mHead = new THREE.Vector3(0, MAST_TOP - GOOSENECK - 0.1, 0.03);
-  const mainGeo = sailGeometry(mTack, mHead, mClew, 0.10, 2.2, mHead.y);
+  boom.position.z = m.boom / 2;
+  sail.add(boom);
+  const tack = new THREE.Vector3(0, 0.05, 0.03), clew = new THREE.Vector3(0, 0.05, m.boom - 0.05);
+  const head = new THREE.Vector3(0, m.mastTop - m.gooseneck - 0.1, 0.03);
+  const geo = sailGeometry(tack, head, clew, 0.10, clew.z, head.y);
   // Two layers sharing the shape: the front faces show the port side, the back
   // faces the starboard side, each with its own correctly-reading number.
-  const sailMat = (map, side) => new THREE.MeshStandardMaterial({ map, side, roughness: 0.8 });
-  const portNumberY = mHead.y * 0.55, stbdNumberY = mHead.y * 0.63;
-  main.add(new THREE.Mesh(mainGeo,
-    sailMat(mainTexture(2.2, mHead.y, mClew.z, mTack.y, mHead.y, portNumberY, false), THREE.FrontSide)));
-  main.add(new THREE.Mesh(mainGeo,
-    sailMat(mainTexture(2.2, mHead.y, mClew.z, mTack.y, mHead.y, stbdNumberY, true), THREE.BackSide)));
-  rig.add(main);
+  const corners = [[tack.z, tack.y], [head.z, head.y], [clew.z, clew.y]];
+  const mat = (map, side) => new THREE.MeshStandardMaterial({ map, side, roughness: 0.8 });
+  sail.add(new THREE.Mesh(geo, mat(sailTexture(clew.z, head.y, base, style, corners, head.y * 0.55, false), THREE.FrontSide)));
+  sail.add(new THREE.Mesh(geo, mat(sailTexture(clew.z, head.y, base, style, corners, head.y * 0.63, true), THREE.BackSide)));
+  rig.add(sail);
+  return { sail, geo };
+}
 
+function buildRig(boat, mats) {
+  const r = boat.rig, rig = new THREE.Group();
+  const sails = boat.sails || {};
+  const base = sails.color || '#fbfbf8';
+  const V = a => new THREE.Vector3(...a);
+  const hounds = V([0, r.hounds ?? r.mastTop, r.mastZ]);
+  const out = { rig };
+
+  ({ sail: out.main, geo: out.mainGeo } = buildMast(r, sails.main, base, mats, rig));
+  for (const c of r.shrouds || []) rig.add(line([V(c), hounds], mats.wire));
+  if (r.backstay) rig.add(line([V([0, r.mastTop, r.mastZ]), V(r.backstay)], mats.wire));
+  if (r.mizzen) {
+    const m = r.mizzen;
+    ({ sail: out.mizzen, geo: out.mizzenGeo } = buildMast(m, sails.mizzen ?? { ...sails.main, number: null }, base, mats, rig));
+    const top = V([0, m.mastTop, m.mastZ]);
+    for (const c of m.shrouds || []) rig.add(line([V(c), top], mats.wire));
+    if (m.backstay) rig.add(line([top, V(m.backstay)], mats.wire));
+  }
   // Jib: pivots about the forestay.
-  const jib = new THREE.Group();
-  jib.position.copy(TACK);
-  const head = hounds.clone().sub(TACK).multiplyScalar(0.97);
-  const jTack = new THREE.Vector3(0, 0.05, 0.02), jClew = new THREE.Vector3(0, 0.35, 1.95);
-  const jibGeo = sailGeometry(jTack, head, jClew, 0.11, jClew.z, head.y);
-  const stripes = jibTexture(jClew.z, head.y, [[jTack.z, jTack.y], [head.z, head.y], [jClew.z, jClew.y]]);
-  jib.add(new THREE.Mesh(jibGeo, sailMat(stripes, THREE.DoubleSide)));
-  rig.add(jib);
-
-  return { rig, main, mainGeo, jib, jibGeo, forestay: head.clone().normalize() };
+  if (r.tack) {
+    const T = V(r.tack);
+    rig.add(line([T, hounds], mats.wire));
+    const jib = new THREE.Group();
+    jib.position.copy(T);
+    const head = hounds.clone().sub(T).multiplyScalar(0.97);
+    const jTack = new THREE.Vector3(0, 0.05, 0.02), jClew = new THREE.Vector3(0, r.jibClew[0], r.jibClew[1]);
+    out.jibGeo = sailGeometry(jTack, head, jClew, 0.11, jClew.z, head.y);
+    const cloth = sailTexture(jClew.z, head.y, base, sails.jib, [[jTack.z, jTack.y], [head.z, head.y], [jClew.z, jClew.y]], 0, false);
+    jib.add(new THREE.Mesh(out.jibGeo, new THREE.MeshStandardMaterial({ map: cloth, side: THREE.DoubleSide, roughness: 0.8 })));
+    rig.add(jib);
+    out.jib = jib;
+    out.forestay = head.clone().normalize();
+  }
+  return out;
 }
 
-function buildAppendages(mats) {
-  const g = new THREE.Group();
-  g.add(box(0.03, 0.95, 0.42, mats.foil, 0, -0.68, -0.50));  // centerboard, down
-  g.add(box(0.03, 1.00, 0.34, mats.foil, 0, 0.07, 3.02));  // kick-up rudder
-  g.add(box(0.05, 0.05, 1.30, mats.foil, 0, 0.72, 2.30));  // tiller
-  // Outboard on a port-side transom bracket
-  g.add(box(0.30, 0.42, 0.40, mats.outboard, -0.55, 0.62, 3.10));
-  g.add(box(0.08, 0.85, 0.12, mats.outboard, -0.55, 0.0, 3.12));
-  return g;
+// Everything that belongs to the boat, built from its description.
+function buildBoat(boat) {
+  const std = (color, extra = {}) => new THREE.MeshStandardMaterial({
+    color, roughness: 0.7, metalness: 0, flatShading: true, side: THREE.DoubleSide, ...extra,
+  });
+  const c = boat.colors;
+  const mats = {
+    hull: std(c.hull),
+    stripe: std(c.stripe || c.hull),
+    bottom: std(c.bottom),
+    deck: std(c.deck),
+    cabin: std(c.cabin),
+    cockpit: std(c.cockpit),
+    spar: std(c.spar, { metalness: 0.4, roughness: 0.4 }),
+    foil: std(c.foil),
+    outboard: std(0x3a3d42),
+    tramp: std(c.tramp || '#22314f', { transparent: true, opacity: 0.85, flatShading: false }),
+    wire: new THREE.LineBasicMaterial({ color: 0x606870 }),
+  };
+  const group = new THREE.Group();
+  for (const h of boat.hulls) group.add(buildHull(boat, h, mats));
+  group.add(buildDeck(boat, mats), buildFittings(boat, mats));
+  const rig = buildRig(boat, mats);
+  group.add(rig.rig);
+  const lights = buildNavLights(boat.lights);
+  group.add(lights.group);
+  const dispose = () => group.traverse(o => {
+    o.geometry?.dispose();
+    for (const m of [o.material].flat()) {
+      if (!m) continue;
+      m.map?.dispose();
+      m.dispose();
+    }
+  });
+  return { group, rig, lights, dispose };
 }
-
-// Navigation lights for a sailboat under 12 m (COLREGS rule 25, plus a masthead
-// steaming light): each is visible only within its arc, measured from dead ahead.
-const NAV_LIGHTS = [
-  { name: 'masthead', color: 0xfff4dc, pos: [0, MAST_TOP + 0.04, MAST_Z - 0.07], from: -112.5, to: 112.5 },
-  { name: 'port', color: 0xff2a1a, pos: [-0.05, 0.96, -2.74], from: -112.5, to: 0 },
-  { name: 'starboard', color: 0x14ff5a, pos: [0.05, 0.96, -2.74], from: 0, to: 112.5 },
-  { name: 'stern', color: 0xfff4dc, pos: [0, 0.74, 2.88], from: 112.5, to: 247.5 },
-];
 
 function glowTexture() {
   const S = 128, c = document.createElement('canvas');
@@ -362,10 +421,11 @@ function arcWeight(bearing, from, to) {
   return smooth(-2, 2, rel) * (1 - smooth(span - 2, span + 2, rel));
 }
 
-function buildNavLights() {
+// Lights from the boat description: { name, color, pos, from, to } each.
+function buildNavLights(defs) {
   const group = new THREE.Group();
   const glow = glowTexture();
-  const lights = NAV_LIGHTS.map(def => {
+  const lights = defs.map(def => {
     const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8),
       new THREE.MeshBasicMaterial({ color: 0x555555 }));
     bulb.position.set(...def.pos);
@@ -458,7 +518,8 @@ function compassTexture(ink) {
   return tex;
 }
 
-export function createBoatView(container) {
+// boatSpec: a boat from boats.js makeBoat().
+export function createBoatView(container, boatSpec) {
   // Log depth keeps the boat, water and map tiles apart when zoomed out kilometres.
   const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -490,16 +551,6 @@ export function createBoatView(container) {
     color, roughness: 0.7, metalness: 0, flatShading: true, side: THREE.DoubleSide, ...extra,
   });
   const mats = {
-    hullBlue: std(0x1d4c97),
-    pinstripe: std(0xffffff),
-    bottom: std(0x141414),
-    deck: std(0xe2dccd),
-    cabin: std(0xf7f6f1),
-    cockpit: std(0xb3aa98),
-    spar: std(0xb8c0c8, { metalness: 0.4, roughness: 0.4 }),
-    foil: std(0x2b2b2b),
-    outboard: std(0x3a3d42),
-    wire: new THREE.LineBasicMaterial({ color: 0x606870 }),
     aw: std(0xff8a1f, { flatShading: false }),
     tw: std(0x2f7cf0, { flatShading: false }),
     cog: new THREE.MeshBasicMaterial({ color: 0x9a5bd6, transparent: true, opacity: 0.8 }),
@@ -525,16 +576,28 @@ export function createBoatView(container) {
   cog.add(cogStripe);
   scene.add(cog);
 
-  // Boat, rotated by heading, pitch and heel.
+  // Boat, rotated by heading, pitch and heel. The view was designed around the
+  // 5.7 m Potter 19; `k` scales the camera, compass ring and arrows to other boats.
   const boat = new THREE.Group();
   boat.rotation.order = 'YXZ';
-  boat.add(buildHull(mats), buildCabin(mats), buildAppendages(mats));
-  const rig = buildRig(mats);
-  boat.add(rig.rig);
-  const navLights = buildNavLights();
-  const ais = new AisLayer(scene);
-  boat.add(navLights.group);
   scene.add(boat);
+  const ais = new AisLayer(scene);
+  let built = null, k = 1;
+  const target = new THREE.Vector3(0, 1.6, 0);
+  function setBoat(spec) {
+    if (built) {
+      boat.remove(built.group);
+      built.dispose();
+    }
+    built = buildBoat(spec);
+    boat.add(built.group);
+    const old = k;
+    k = clamp(spec.loa / 5.72, 0.5, 5);
+    target.y = 0.24 * spec.rig.mastTop;
+    cog.scale.setScalar(k);
+    cam.distance *= k / old;
+    zoomTo(cam.distance);
+  }
 
   // Wind arrows follow the heading but not heel, so they stay readable.
   const windFrame = new THREE.Group();
@@ -563,23 +626,25 @@ export function createBoatView(container) {
 
   // Close up the arrows float above the deck; zoomed out they shrink relative to
   // the view and settle just above the water around the boat.
+  // Sizes are for the Potter 19 and scaled by k: `distance` is the camera's
+  // distance divided by k.
   function placeArrow(arrow, angleDeg, liftClose, distance) {
     arrow.visible = Number.isFinite(angleDeg);
     if (!arrow.visible) return;
     const size = Math.max(1, (distance / 16) ** 0.8);
-    const settle = Math.min(1, Math.max(0, (distance - 25) / 100));  // 0 close up, 1 from 125 m
-    const height = (1 - settle) * liftClose + settle * 0.4 * size;
+    const settle = Math.min(1, Math.max(0, (distance - 25) / 100));  // 0 close up, 1 from 125 m (Potter)
+    const height = k * ((1 - settle) * liftClose + settle * 0.4 * size);
     const a = angleDeg * DEG;
-    const radius = 6.2 * size;
-    arrow.scale.setScalar(size);
+    const radius = 6.2 * size * k;
+    arrow.scale.setScalar(size * k);
     arrow.position.set(radius * Math.sin(a), height, -radius * Math.cos(a));
     arrow.rotation.y = -a;  // local +Z points back at the boat
   }
 
   // Camera: orbit by dragging, zoom by pinching or scrolling.
   const cam = { offset: -35, elevation: 20, distance: 16 };
-  const maxDistance = () => (mapLayer ? 6000 : 45);
-  const zoomTo = d => { cam.distance = Math.min(maxDistance(), Math.max(7, d)); };
+  const maxDistance = () => (mapLayer ? 6000 : 45 * k);
+  function zoomTo(d) { cam.distance = Math.min(maxDistance(), Math.max(7 * k, d)); }
   let follow = true;
   const pointers = new Map();
   let pinchStart = 0, pinchDist = 0;
@@ -615,7 +680,7 @@ export function createBoatView(container) {
     e.preventDefault();
     zoomTo(cam.distance * (1 + e.deltaY * 0.0015));
   }, { passive: false });
-  el.addEventListener('dblclick', () => Object.assign(cam, { offset: -35, elevation: 20, distance: 16 }));
+  el.addEventListener('dblclick', () => Object.assign(cam, { offset: -35, elevation: 20, distance: 16 * k }));
 
   function resize() {
     const w = container.clientWidth, h = container.clientHeight;
@@ -628,8 +693,7 @@ export function createBoatView(container) {
   observer.observe(container);
   resize();
 
-  const target = new THREE.Vector3(0, 1.6, 0);
-  const forestayAxis = rig.forestay;
+  setBoat(boatSpec);
 
   return {
     // s: { hdg, awa, twa, cog, heel, pitch, lat, lon, utc, sog, cogTrue, trim: {main, jib, side, luffing}, ais };
@@ -640,22 +704,30 @@ export function createBoatView(container) {
       const hdg = Number.isFinite(s.hdg) ? s.hdg : 0;
       boat.rotation.set((s.pitch || 0) * DEG, -hdg * DEG, -(s.heel || 0) * DEG);
       windFrame.rotation.y = -hdg * DEG;
-      placeArrow(aw, s.awa, 3.2, cam.distance);
-      placeArrow(tw, s.twa, 4.4, cam.distance);
+      const dn = cam.distance / k;  // distance as if this were the Potter 19
+      placeArrow(aw, s.awa, 3.2, dn);
+      placeArrow(tw, s.twa, 4.4, dn);
       cog.visible = Number.isFinite(s.cog);
       if (cog.visible) cog.rotation.y = -s.cog * DEG;
 
       const { main, jib, side, luffing } = s.trim;
       const flap = luffing ? Math.sin(performance.now() / 90) * 0.5 : 1;
+      const rig = built.rig;
       rig.main.rotation.y = -side * main * DEG;
       setCamber(rig.mainGeo, -side * flap);
-      rig.jib.quaternion.setFromAxisAngle(forestayAxis, -side * jib * DEG);
-      setCamber(rig.jibGeo, -side * flap);
+      if (rig.mizzen) {
+        rig.mizzen.rotation.y = -side * main * 0.85 * DEG;
+        setCamber(rig.mizzenGeo, -side * flap);
+      }
+      if (rig.jib) {
+        rig.jib.quaternion.setFromAxisAngle(rig.forestay, -side * jib * DEG);
+        setCamber(rig.jibGeo, -side * flap);
+      }
 
       // Keep the wind arrows, compass ring and marker readable as the camera pulls back.
-      const grow = Math.max(1, (cam.distance / 16) ** 0.8);  // same growth as the wind arrows
-      ring.scale.setScalar(grow);
-      marker.visible = cam.distance > 60;
+      const grow = Math.max(1, (dn / 16) ** 0.8);  // same growth as the wind arrows
+      ring.scale.setScalar(grow * k);
+      marker.visible = dn > 60;
       marker.scale.setScalar(cam.distance / 22);
       marker.position.set(0, 0.05, 0);
       marker.rotation.set(-Math.PI / 2, -hdg * DEG, 0);
@@ -685,7 +757,7 @@ export function createBoatView(container) {
       moonLight.intensity = 0.4 * moonFraction * smooth(-2, 10, moonAltitude) * (1 - daylight);
       // Navigation lights: on from sunset to sunrise.
       boat.updateMatrixWorld(true);
-      navLights.update(1 - smooth(-1.5, 0, sunAltitude), camera, boat, cam.distance);
+      built.lights.update(1 - smooth(-1.5, 0, sunAltitude), camera, boat, cam.distance);
 
       renderer.clear();
       renderer.toneMapping = THREE.ACESFilmicToneMapping;  // the sky model needs it
@@ -695,6 +767,7 @@ export function createBoatView(container) {
       renderer.render(scene, camera);
     },
     canvas: renderer.domElement,
+    setBoat,
     setFollow(on) { follow = on; },
     // Resolves to the map layers available offline, e.g. ['imagery', 'chart'].
     mapLayers() { return mapReady; },

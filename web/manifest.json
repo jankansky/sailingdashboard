@@ -1,6 +1,6 @@
 {
-  "name": "Potter 19 Dashboard",
-  "short_name": "Potter 19",
+  "name": "Sailing Dashboard",
+  "short_name": "Sailing",
   "start_url": "./",
   "display": "fullscreen",
   "orientation": "any",

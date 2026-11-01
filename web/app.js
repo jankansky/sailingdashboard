@@ -1,6 +1,6 @@
 'use strict';
 
-// Potter 19 dashboard front end. Receives the boat state from the Pi as
+// Sailing dashboard front end. Receives the boat state from the Pi as
 // Server-Sent Events and animates it at display frame rate.
 
 const KN = 1.943844;  // knots per m/s
@@ -136,6 +136,93 @@ $('btn-theme').addEventListener('click', () => {
   applySettings();
 });
 
+// ------------------------------------------------------------ boat
+
+// Which boat is drawn: a catalog entry from boats.js, with a length for the
+// generic types. Saved on this tablet.
+const boatUi = { lib: null, spec: null, plan: null, choice: store.get('boat', { id: 'potter19' }), timer: 0 };
+const boatsReady = import('./boats.js').then(lib => {
+  boatUi.lib = lib;
+  applyBoat(boatUi.choice);
+});
+
+// rebuild3d: false while a length slider is being dragged; the 3D boat is rebuilt
+// once it settles, since that takes longer than redrawing the 2D views.
+function applyBoat(choice, rebuild3d = true) {
+  const lib = boatUi.lib;
+  const spec = lib.makeBoat(choice.id, choice.length);
+  boatUi.choice = spec.generic ? { id: spec.id, length: spec.loa } : { id: spec.id };
+  boatUi.spec = spec;
+  store.set('boat', boatUi.choice);
+  if (spec.generic) store.set('boatLengths', { ...store.get('boatLengths', {}), [spec.id]: spec.loa });
+  boatUi.plan = lib.drawPlan(spec, $('boat'));
+  lib.drawStern(spec, $('heel-boat'));
+  setSails(sailTrim(sm.awa != null ? wrap180(sm.awa) : 0));
+  $('btn-boat').textContent = spec.name;
+  document.title = `${spec.name} · Sailing Dashboard`;
+  for (const card of document.querySelectorAll('.boat-card')) card.classList.toggle('selected', card.dataset.id === spec.id);
+  clearTimeout(boatUi.timer);
+  boatUi.timer = setTimeout(() => view3d.view?.setBoat(boatUi.spec), rebuild3d ? 0 : 250);
+}
+
+function buildBoatDialog() {
+  const { BOATS, GENERIC, makeBoat, fmtLength } = boatUi.lib;
+  const card = (id, name, note) => {
+    const c = document.createElement('div');
+    c.className = 'boat-card';
+    c.dataset.id = id;
+    c.tabIndex = 0;
+    const title = document.createElement('div');
+    title.className = 'boat-name';
+    title.textContent = name;
+    const sub = document.createElement('div');
+    sub.className = 'boat-note';
+    sub.textContent = note;
+    c.append(title, sub);
+    return c;
+  };
+  const named = $('boat-named');
+  named.replaceChildren();
+  for (const b of BOATS) {
+    const c = card(b.id, b.name, `${fmtLength(makeBoat(b.id).loa)} · ${b.note}`);
+    c.addEventListener('click', () => applyBoat({ id: b.id }));
+    named.appendChild(c);
+  }
+  const generic = $('boat-generic');
+  generic.replaceChildren();
+  for (const g of GENERIC) {
+    const c = card(g.id, g.name, g.note);
+    const lengths = store.get('boatLengths', {});
+    const row = document.createElement('label');
+    row.className = 'boat-length';
+    const slider = document.createElement('input');
+    Object.assign(slider, { type: 'range', min: g.min, max: g.max, step: 0.5, value: lengths[g.id] ?? g.length });
+    slider.setAttribute('aria-label', `${g.name} length`);
+    const out = document.createElement('span');
+    out.textContent = fmtLength(Number(slider.value));
+    row.append(slider, out);
+    c.appendChild(row);
+    const choose = settle => applyBoat({ id: g.id, length: Number(slider.value) }, settle);
+    slider.addEventListener('input', () => {
+      out.textContent = fmtLength(Number(slider.value));
+      choose(false);
+    });
+    slider.addEventListener('change', () => choose(true));
+    c.addEventListener('click', e => { if (e.target !== slider) choose(true); });
+    generic.appendChild(c);
+  }
+  for (const c of document.querySelectorAll('.boat-card')) {
+    c.classList.toggle('selected', c.dataset.id === boatUi.spec.id);
+    c.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); c.click(); } });
+  }
+}
+
+$('btn-boat').addEventListener('click', async () => {
+  await boatsReady;
+  buildBoatDialog();
+  $('boat-dialog').showModal();
+});
+
 // ------------------------------------------------------------ 3D view
 
 const view3d = {
@@ -167,8 +254,8 @@ async function setView(mode3d) {
   if (!mode3d || view3d.view || view3d.loading) return;
   view3d.loading = true;
   try {
-    const { createBoatView } = await import('./boat3d.js');
-    view3d.view = createBoatView($('boat3d'));
+    const [{ createBoatView }] = await Promise.all([import('./boat3d.js'), boatsReady]);
+    view3d.view = createBoatView($('boat3d'), boatUi.spec);
     view3d.view.setFollow(view3d.follow);
     themeView3d();
     view3d.layers = await view3d.view.mapLayers();
@@ -333,7 +420,6 @@ function smoothAngle(key, target, alpha) {
 const els = {
   compass: $('compass'), twdMark: $('twd-mark'), twdAvg: $('twd-avg'), cogMark: $('cog-mark'),
   aw: $('aw-arrow'), tw: $('tw-arrow'), awLetter: $('aw-letter'), twLetter: $('tw-letter'),
-  jib: $('jib'), jibSail: $('jib-sail'), main: $('main'), mainSail: $('main-sail'),
   heelBoat: $('heel-boat'), heelText: $('heel-text'), noData: $('no-data'),
 };
 
@@ -352,14 +438,7 @@ function sailTrim(awa) {
 }
 
 function setSails(trim) {
-  const { side, luffing, main, jib } = trim;
-  const depth = luffing ? 5 : 30;
-  els.main.setAttribute('transform', `translate(0,-130) rotate(${main * side})`);
-  els.mainSail.setAttribute('d', `M0,0 Q${-side * depth},134 0,268 Z`);
-  els.jib.setAttribute('transform', `translate(0,-282) rotate(${jib * side})`);
-  els.jibSail.setAttribute('d', `M0,0 Q${-side * depth * 0.8},95 0,190 Z`);
-  els.mainSail.classList.toggle('luffing', luffing);
-  els.jibSail.classList.toggle('luffing', luffing);
+  if (boatUi.plan) boatUi.lib.trimPlan(boatUi.plan, trim);
 }
 
 function setPill(id, age, warnIf = false) {
@@ -1012,7 +1091,7 @@ async function saveScreenshot() {
     if (!blob) throw new Error('could not encode the image');
     const t = new Date(dataNow());
     const p2 = n => String(n).padStart(2, '0');
-    const name = `potter19-${t.getFullYear()}-${p2(t.getMonth() + 1)}-${p2(t.getDate())}` +
+    const name = `${boatUi.choice.id}-${t.getFullYear()}-${p2(t.getMonth() + 1)}-${p2(t.getDate())}` +
       `-${p2(t.getHours())}${p2(t.getMinutes())}${p2(t.getSeconds())}${replay ? '-replay' : ''}.png`;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
