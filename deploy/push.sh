@@ -26,7 +26,7 @@ done
 dest=sailingdashboard  # in the Pi user's home directory
 rsync -az --delete --stats \
     --exclude 'build/' --exclude 'cmake-build-*/' --exclude '.idea/' \
-    --exclude 'tiles/' --exclude 'tiles_cache/' --exclude '.DS_Store' \
+    --exclude 'tiles/' --exclude 'tiles_cache/' --exclude 'recordings/' --exclude '.DS_Store' \
     ./ "$host:$dest/"
 if [ "$tiles" = 1 ] && [ -d tiles ]; then
     echo "Sending map tiles ($(du -sh tiles | cut -f1))..."

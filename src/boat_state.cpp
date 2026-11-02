@@ -117,8 +117,8 @@ BoatState::Derived BoatState::derive(Clock::time_point now) {
         d.attSrc = "n2k";
         d.attAge = attT.age(now);
     } else if (imuT.fresh(now, 2) && std::isfinite(imuRoll)) {
-        r = imuRoll;
-        p = imuPitch;
+        r = settings.imuInvertRoll ? -imuRoll : imuRoll;
+        p = settings.imuInvertPitch ? -imuPitch : imuPitch;
         d.attSrc = "imu";
         d.attAge = imuT.age(now);
     } else if (attT.valid() || imuT.valid()) {

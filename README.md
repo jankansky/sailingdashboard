@@ -111,7 +111,9 @@ The PiCAN3 passes the header pins through, and it uses SPI and GPIO25, so there'
 - Point the board's **X arrow toward the bow**, parallel to the centreline.
 - Once installed:
   - At the dock, zero any leftover tilt with `--roll-offset`.
-  - Heel to starboard and confirm the gauge shows "S". If not, add `--invert-roll`.
+  - Heel to starboard and confirm the gauge shows "S". If not, add `--imu-invert-roll`.
+  - If heel and pitch are both reversed, the X arrow points aft. Turn the board around, or add
+    `--imu-invert-roll --imu-invert-pitch`.
   - If heel moves when the bow pitches instead, the board is rotated 90°. Turn it so X faces forward.
 
 `./deploy/install.sh --imu` enables the Pi's serial port for the sensor (it turns off
@@ -202,6 +204,7 @@ Edit `/etc/default/sailingdashboard`, then `sudo systemctl restart sailingdashbo
 | `--imu /dev/serial0` | BNO085 heel/pitch, used when no attitude sensor is on the bus |
 | `--variation -14.3` | magnetic variation (east +). Only needed if nothing on the bus sends it; the GPS normally does |
 | `--invert-roll` | heel shows on the wrong side (depends on how the SteadyCast is mounted) |
+| `--imu-invert-roll` / `--imu-invert-pitch` | the BNO085's heel or pitch is reversed (affects only the IMU) |
 | `--roll-offset DEG` | heel reads non-zero at the dock |
 | `--heading-offset DEG` | heading sensor alignment error |
 

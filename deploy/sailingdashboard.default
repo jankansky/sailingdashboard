@@ -4,6 +4,7 @@
 # Source:  --can can0   (SH-C30A with candleLight/gs_usb firmware, the usual case)
 #          --slcan /dev/ttyACM0   (if the adapter has slcan firmware instead)
 # IMU:     --imu /dev/serial0     BNO085 heel/pitch (used only if no attitude sensor is on the bus)
+#          --imu-invert-roll --imu-invert-pitch   if the IMU's heel or pitch is reversed
 # Logging: the bus is recorded to /var/lib/sailingdashboard/recordings (Logs button on the tablet).
 #          --record-max-gb 4   keep at most 4 GB of recordings (default 8; oldest deleted first)
 #          --no-record         turn recording off

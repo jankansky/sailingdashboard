@@ -53,6 +53,8 @@ struct Settings {
     double headingOffsetDeg = 0;  // added to the heading sensor (installation alignment)
     double rollOffsetDeg = 0;  // added to heel after sign correction
     bool invertRoll = false;  // flip if the sensor reports heel to the wrong side
+    bool imuInvertRoll = false;  // the same for the Pi's own IMU only
+    bool imuInvertPitch = false;
 };
 
 // One 1 Hz sample of the history shown in the wind chart.

@@ -42,6 +42,8 @@ void usage(const char* argv0) {
         "  --invert-roll        flip heel direction if the sensor is mounted reversed\n"
         "  --imu DEVICE         BNO085 in UART-RVC mode for heel/pitch, e.g. /dev/serial0\n"
         "                       (used when no attitude sensor is on the bus)\n"
+        "  --imu-invert-roll    flip the IMU's heel only (sensor on the bus unaffected)\n"
+        "  --imu-invert-pitch   flip the IMU's pitch only\n"
         "  --record DIR         log the bus to DIR (one candump file per outing) and offer\n"
         "                       the recordings for replay on the tablet\n"
         "  --record-max-gb N    delete the oldest recordings beyond N GB (default 8)\n"
@@ -126,6 +128,8 @@ int main(int argc, char** argv) {
         else if (a == "--heading-offset") state.settings.headingOffsetDeg = std::atof(next().c_str());
         else if (a == "--roll-offset") state.settings.rollOffsetDeg = std::atof(next().c_str());
         else if (a == "--invert-roll") state.settings.invertRoll = true;
+        else if (a == "--imu-invert-roll") state.settings.imuInvertRoll = true;
+        else if (a == "--imu-invert-pitch") state.settings.imuInvertPitch = true;
         else if (a == "--imu") imuDevice = next();
         else if (a == "--record") recordDir = next();
         else if (a == "--record-max-gb") recordMaxGb = std::max(0.1, std::atof(next().c_str()));
