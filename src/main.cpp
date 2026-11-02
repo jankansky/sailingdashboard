@@ -12,6 +12,7 @@
 #include <thread>
 
 #include "boat_state.hpp"
+#include "clock_sync.hpp"
 #include "frame_source.hpp"
 #include "http_server.hpp"
 #include "imu_rvc.hpp"
@@ -48,6 +49,7 @@ void usage(const char* argv0) {
         "                       the recordings for replay on the tablet\n"
         "  --record-max-gb N    delete the oldest recordings beyond N GB (default 8)\n"
         "  --recordings DIR     offer recordings in DIR for replay without recording\n"
+        "  --set-clock          set the Pi's clock from GPS time (the service does this)\n"
         "  --no-record          turn off a --record given earlier (e.g. in the service file)\n"
         "  --verbose            print every decoded message\n",
         argv0);
@@ -92,6 +94,7 @@ int main(int argc, char** argv) {
     std::string replayPath, imuDevice, recordDir, recordingsDir;
     double recordMaxGb = 8;
     bool noRecord = false;
+    bool setClock = false;
     bool sim = false;
     double simLat = 42.3355, simLon = -70.9920;  // Boston outer harbor
     BoatState state;
@@ -135,6 +138,7 @@ int main(int argc, char** argv) {
         else if (a == "--record-max-gb") recordMaxGb = std::max(0.1, std::atof(next().c_str()));
         else if (a == "--recordings") recordingsDir = next();
         else if (a == "--no-record") noRecord = true;
+        else if (a == "--set-clock") setClock = true;
         else if (a == "--verbose") verbose = true;
         else {
             usage(argv[0]);
@@ -168,11 +172,23 @@ int main(int argc, char** argv) {
     if (recorder) recordImu = [r = recorder.get()](const CanFrame& f) { r->write(f); };
     if (!imuDevice.empty())
         imu = std::thread(runImuRvc, imuDevice, std::ref(state), std::cref(g_stop), std::cref(recordImu));
-    std::thread sampler([&state, &recorder] {
+    if (setClock && (sim || !replayPath.empty())) {
+        std::printf("not setting the clock from simulated or replayed GPS\n");
+        setClock = false;
+    }
+    std::thread sampler([&state, &recorder, setClock] {
+        ClockSync clockSync;
+        ClockWatch clockWatch;
         auto next = std::chrono::steady_clock::now();
         while (!g_stop) {
             next += std::chrono::seconds(1);
             std::this_thread::sleep_until(next);
+            if (setClock) clockSync.tick(state);
+            if (int64_t step = clockWatch.tick()) {
+                std::printf("the clock moved %+.1f s\n", step / 1e6);
+                state.shiftHistory(step / 1000);
+                if (recorder) recorder->clockStepped(step);
+            }
             state.sampleHistory();
             if (recorder) recorder->tick();
         }

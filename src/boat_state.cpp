@@ -276,6 +276,11 @@ HistorySample BoatState::sampleHistory() {
     return s;
 }
 
+void BoatState::shiftHistory(int64_t deltaMs) {
+    std::lock_guard lock(mu);
+    for (auto& s : history_) s.t += deltaMs;
+}
+
 void BoatState::setHistory(std::deque<HistorySample> samples) {
     std::lock_guard lock(mu);
     history_ = std::move(samples);

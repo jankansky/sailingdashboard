@@ -103,7 +103,11 @@ std::string param(const std::string& target, const std::string& name) {
     return "";
 }
 
-int64_t nowMs() { return wallClockUs() / 1000; }
+// For session timeouts: unaffected by the system clock being set.
+int64_t nowMs() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
 
 std::string contentType(const std::string& path) {
     auto dot = path.rfind('.');

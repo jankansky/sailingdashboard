@@ -133,6 +133,7 @@ public:
     HistorySample sampleHistory();
     // Replaces the history (used when jumping to a point in a recording).
     void setHistory(std::deque<HistorySample> samples);
+    void shiftHistory(int64_t deltaMs);  // the system clock was set
 
 private:
     struct Derived {

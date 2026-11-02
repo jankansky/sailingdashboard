@@ -74,8 +74,8 @@ boat 12 V (switched breaker) ─────────► PiCAN3 12 V input  (
   Waveshare's wiki.
 - **Power:** like the PiCAN3, it can power the Pi from the boat's 12 V through its power input. The CAN
   side is isolated, which helps avoid ground loops on a boat.
-- **Clock:** it has no real-time clock, unlike the PiCAN3. Away from the internet, recordings may be
-  dated wrong, but replay times still come from the boat's GPS (see [Recordings and replay](#recordings-and-replay)).
+- **Clock:** it has no real-time clock, unlike the PiCAN3. The dashboard sets the Pi's clock from the
+  GPS instead (see [Recordings and replay](#recordings-and-replay)).
 - **Install:** run `./deploy/install.sh --canfd-hat` (it can be combined with `--imu`; not with `--pican3`),
   then reboot. Check with `dmesg | grep mcp251xfd` (expect "successfully initialized" for each channel)
   and `ip -details link show can0`.
@@ -208,6 +208,9 @@ Edit `/etc/default/sailingdashboard`, then `sudo systemctl restart sailingdashbo
 | `--roll-offset DEG` | heel reads non-zero at the dock |
 | `--heading-offset DEG` | heading sensor alignment error |
 
+The service always adds `--record /var/lib/sailingdashboard/recordings --set-clock`.
+Add `--no-record` to turn recording off.
+
 ## The display
 
 - **Boat**: tap the boat's name at the top left to choose what's drawn in the 2D and 3D views.
@@ -275,9 +278,10 @@ Tap **Logs** to list the recordings, download one, or **Replay** it. A replay ba
 
 Everything follows the replay: instruments, wind chart, 3D view, sun and moon, and AIS targets.
 Each tablet replays on its own, so the helm's tablet can stay live while someone else reviews.
-The Pi's clock dates the files. With a PiCAN3, its battery-backed clock keeps time with the Pi
-offline. Without one, recording dates may be off until the Pi next sees the internet, but
-replay times come from the boat's GPS.
+The Pi's clock dates the recordings. Without internet or a battery-backed clock (the PiCAN3 has one),
+the Pi starts each day at the time it last shut down. So the service sets the Pi's clock from
+GPS time once the GPS has a fix (`--set-clock`). When the clock is set, from GPS or the internet,
+the recording in progress has its earlier times corrected and is renamed for its true start.
 
 ## Development (Mac or Linux, no hardware)
 
