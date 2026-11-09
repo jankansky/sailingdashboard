@@ -154,13 +154,32 @@ export class MapTiles {
       }
     }
 
+    const show = (t, z, x, y, order) => {
+      const p = place(z, x, y);
+      t.used = frame;
+      t.mesh.position.set(p.cx, -0.02, p.cz);
+      t.mesh.scale.set(p.half * 2, p.half * 2, 1);
+      t.mesh.renderOrder = order;
+    };
+    // Until a tile has loaded, show what's already loaded in its place: its finer
+    // children (when zooming out) over its nearest coarser ancestor (when zooming
+    // in). Otherwise every zoom step flashes the water through for a moment.
+    const standIn = n => {
+      for (const [cx, cy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+        const cz = n.z + 1, xx = n.x * 2 + cx, yy = n.y * 2 + cy;
+        const c = this.tiles.get(`${cz}/${xx}/${yy}`);
+        if (c?.loaded) show(c, cz, xx, yy, -20 + cz);
+      }
+      for (let z = n.z - 1, x = n.x >> 1, y = n.y >> 1; z >= info.minzoom; z--, x >>= 1, y >>= 1) {
+        const a = this.tiles.get(`${z}/${x}/${y}`);
+        if (a?.loaded) return show(a, z, x, y, -60 + z);
+      }
+    };
     const draw = (n, order) => {
       const t = this.tile(n.z, n.x, n.y);
       if (!t) return;
-      t.used = frame;
-      t.mesh.position.set(n.p.cx, -0.02, n.p.cz);
-      t.mesh.scale.set(n.p.half * 2, n.p.half * 2, 1);
-      t.mesh.renderOrder = order;
+      show(t, n.z, n.x, n.y, order);
+      if (!t.loaded) standIn(n);
     };
     for (const n of roots) draw(n, -40);
     for (const n of leaves) draw(n, -20 + n.z);  // finer tiles on top
