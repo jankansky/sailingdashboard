@@ -22,8 +22,8 @@ const BELT = [0.9, 0.4, 0.9];
 const BELT_LEVEL = 7;
 // Daytime haze: pales the sky near the horizon (0 = none, 1 = grey horizon) and
 // fades distant water and land into the horizon colour.
-const HAZE = 0.45;
-const VISIBILITY_M = 30000;  // good, not perfect, visibility
+const HAZE = 0.3;
+const VISIBILITY_M = 50000;  // a clear day
 // FogExp2 fades as exp(-(density * d)^2); this leaves 2% contrast at the visibility distance.
 export const HAZE_DENSITY = Math.sqrt(3.912) / VISIBILITY_M;
 export const SKY_EXPOSURE = 0.35;

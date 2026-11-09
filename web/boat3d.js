@@ -533,7 +533,7 @@ export function createBoatView(container, boatSpec) {
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 80000);
+  const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 150000);
   const ambient = new THREE.HemisphereLight(0xffffff, 0x50606f, 1.4);
   const sun = new THREE.DirectionalLight(0xffffff, 2.0);
   const moonLight = new THREE.DirectionalLight(0xb8c8ff, 0);
@@ -558,7 +558,7 @@ export function createBoatView(container, boatSpec) {
 
   // Water and compass ring are fixed to the world (north = -Z).
   const waterMat = new THREE.MeshBasicMaterial({ color: 0x8fb8d8, transparent: true, opacity: 0.78, depthWrite: false });
-  const water = new THREE.Mesh(new THREE.CircleGeometry(40000, 96), waterMat);
+  const water = new THREE.Mesh(new THREE.CircleGeometry(90000, 96), waterMat);
   water.rotation.x = -Math.PI / 2;
   scene.add(water);
   let ringTex = compassTexture('#10283f');

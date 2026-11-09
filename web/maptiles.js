@@ -25,6 +25,15 @@ function tileBounds(z, x, y) {
   return { w: x / n * 360 - 180, e: (x + 1) / n * 360 - 180, n: lat(y), s: lat(y + 1) };
 }
 
+// Areas a source has no data for come as pure black (USGS imagery offshore) or
+// fully transparent (NOAA charts outside their coverage). Drop those pixels so
+// the water shows instead of black squares. Real imagery never gets that dark
+// (its darkest water is about 24/255), so 0.005 linear (about 15/255) is safe.
+function seeThroughNoData(shader) {
+  shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+    if (diffuseColor.a < 0.5 || max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b)) < 0.005) discard;`);
+}
+
 export async function loadTileIndex() {
   try {
     const r = await fetch('tiles/index.json', { cache: 'no-cache' });
@@ -173,6 +182,7 @@ export class MapTiles {
     const top = this.maxZoomFor(z, x, y);
     if (top < 0) return null;
     const material = new THREE.MeshBasicMaterial({ depthWrite: false });
+    material.onBeforeCompile = seeThroughNoData;
     const mesh = new THREE.Mesh(this.geometry, material);
     mesh.rotation.x = -Math.PI / 2;
     mesh.visible = false;
