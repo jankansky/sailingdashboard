@@ -3,7 +3,9 @@
 A Raspberry Pi listens to the boat's NMEA 2000 bus through a PiCAN3 HAT (or an
 SH-C30A USB-CAN adapter). It serves a live visualization of the boat to any tablet
 browser on the boat's Wi-Fi. You choose which boat is drawn, from a West Wight Potter 19
-to a 25 m catamaran (see [The display](#the-display)).
+to a 25 m catamaran (see [The display](#the-display)). When the Pi has internet it also
+fetches satellite, radar and forecasts for the waters around the boat
+(see [Weather and forecasts](#weather-and-forecasts)).
 
 - **Wind**: gWind Wireless 2 → GNX Wind → PGN 130306 (apparent wind)
 - **Heading and heel**: SteadyCast heading sensor → PGNs 127250, 127251, 127257
@@ -192,6 +194,68 @@ the Pi.
 In 3D with a map shown, you can zoom out to about 6 km. An orange marker shows the boat
 once it's too small to see.
 
+## Weather and forecasts
+
+The **Wx** view shows the weather in a square about 220 km across, centred on the boat. One
+time slider runs from 12 hours ago, through now, to the end of the forecast.
+
+**Past 12 hours (left of "Now")**: the actual images, not analyses or processed products, one
+every 15 minutes.
+
+- **Visible**: GOES-East visible satellite. Dark at night.
+- **IR**: GOES-East infrared. Brighter means colder, higher cloud tops; it works day and night.
+  It's contrast-stretched, because the source image is very flat.
+- **Radar**: the NEXRAD base reflectivity mosaic, over a land/water basemap.
+
+**Forecast (right of "Now")**: model output drawn on the same map, in the style of
+Tropical Tidbits.
+
+- **Wind** and **Gusts**: 10 m wind in knots, as colour shading with wind barbs.
+- **Weather**: precipitation rate (in/h), cloud cover (white) and isobars every 2 mb.
+- **Waves**: significant wave height in feet, with arrows pointing the way the waves travel.
+- The model button switches between **HRRR** (about 2 days, finest detail), **GFS** and
+  **ECMWF** (about a week). The label shows the model run you're looking at, e.g. `GFS 12Z`.
+  Waves always come from the Open-Meteo marine forecast.
+
+**Controls**: drag the slider, or press ▶ to loop the past images or the forecast hours. ↻
+fetches new data now. Your boat is marked on every map, and the status line at the bottom says
+how old the data is (amber when it's stale).
+
+| Data | Source | Updates |
+|---|---|---|
+| Visible and IR satellite | NOAA nowCOAST (GOES-East) | every 5 min, about 5 min after the scan |
+| Radar | NOAA nowCOAST (NEXRAD mosaic) | every 5 min |
+| Wind, gusts, precipitation, cloud, pressure | Open-Meteo: NOAA HRRR and GFS, ECMWF IFS 0.25° | the Pi checks every 3 hours |
+| Waves | Open-Meteo marine forecast | the Pi checks every 3 hours |
+| Land/water basemap and coastline | NASA GIBS | fetched when the area changes |
+
+### How it gets the data
+
+The Pi does all the fetching and keeps the results in `/var/lib/sailingdashboard/weather`, so
+the tablet needs no internet, and the last fetch can still be viewed on the water. Every 15
+minutes, when it has internet, the Pi runs `tools/fetch_weather.py` (Python 3, which Raspberry
+Pi OS includes; nothing else to install). It downloads the new satellite and radar frames,
+about 0.2 MB, and, every 3 hours, new forecasts, about 3 MB. That's at most about 40 MB a day,
+worth knowing on a phone hotspot.
+
+- **Internet**: the Pi needs a Wi-Fi network with internet: home, the marina or a phone
+  hotspot. If the Pi runs its own hotspot (`--hotspot`), it has no internet and keeps showing
+  the last fetch.
+- **History**: nowCOAST only keeps about 8 hours of images. The full 12 hours builds up while
+  the Pi stays online.
+- **Area**: it follows the boat's GPS position and re-centres once the boat has moved about 35 km.
+  Before there's a position, it uses `--weather-home` (see [Configuration](#configuration));
+  without it, there is nothing to fetch.
+- **Detail**: each forecast is sampled on a 16 × 16 grid, about 14 km apart, and smoothed
+  between the points. Expect broad patterns, not sea breezes around a single island. The wave
+  models are coarse near shore, so close to the coast the colours come from the nearest
+  offshore point.
+- **Free use**: Open-Meteo is free for non-commercial use; fetching forecasts every 3 hours
+  keeps well inside its limits. NOAA and NASA data are public domain.
+
+**Not for navigation.** Check official forecasts and warnings (NWS marine forecasts, VHF
+weather) before you go out.
+
 ## Configuration
 
 Edit `/etc/default/sailingdashboard`, then `sudo systemctl restart sailingdashboard`:
@@ -252,19 +316,8 @@ The service always adds `--record /var/lib/sailingdashboard/recordings --set-clo
     1 nm in the next 30 min, and red within 0.5 nm in the next 20 min. A red line joins both boats'
     positions at the closest approach. The simulator includes four fictional AIS vessels.
   - It runs on Three.js, saved in `web/vendor/` so it works without internet.
-- **Weather**: tap **Wx** at the bottom of the main panel. It covers about 220 km around the boat.
-  - Drag the time slider left for the past 12 hours, as real images rather than analyses: GOES-East
-    **Visible** and **IR** satellite and the NEXRAD **Radar** mosaic, every 15 minutes.
-  - Drag it right for forecasts: **Wind** and **Gusts** (colour and barbs, kn), **Weather**
-    (precipitation, cloud and isobars) and **Waves** (height in ft, arrows for direction). The model
-    button switches between HRRR (2 days), GFS and ECMWF (about a week).
-  - ▶ loops through the past images or the forecast hours.
-  - The Pi fetches new weather every 15 minutes when it has internet (forecasts every 3 hours) and
-    keeps the last fetch, so it can still be viewed offline on the water. ↻ fetches now. The
-    status line says how old it is.
-  - Sources: NOAA nowCOAST (satellite and radar; it keeps about 8 hours, so the full 12 build up
-    while the Pi is online), Open-Meteo (forecasts; free for non-commercial use), NASA GIBS (basemap).
-    Not for navigation.
+- **Weather**: tap **Wx** at the bottom of the main panel for satellite and radar loops of the
+  past 12 hours and model forecasts for the days ahead. See [Weather and forecasts](#weather-and-forecasts).
 - **Header**: status pills turn amber or red when a sensor goes quiet. **Damp** sets the smoothing. **Day/Dusk/Night** switches themes (Night is red-only).
 - **Screenshot** (camera button): saves a PNG of the whole dashboard, including the 3D view, to the
   tablet's downloads. It's named after the boat and the time shown, e.g. `potter19-2026-07-04-143210.png`.
