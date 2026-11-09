@@ -8,6 +8,7 @@
 #include "boat_state.hpp"
 #include "playback.hpp"
 #include "recorder.hpp"
+#include "weather.hpp"
 
 // Tiny HTTP server for the tablet UI:
 //   /             static files from the web root
@@ -17,6 +18,8 @@
 //   /api/history  last 30 minutes of 1 Hz samples (JSON)
 //   /api/ais      AIS targets heard in the last 20 minutes (JSON)
 //   /tiles/...    offline map tiles from the tiles directory (see tools/fetch_tiles.py)
+//   /weather/...  satellite, radar and forecasts fetched by tools/fetch_weather.py
+//   /api/weather  {enabled, running};  POST /api/weather/refresh  fetch now
 //
 // Recordings:
 //   /api/recorder                        recorder status
@@ -37,6 +40,7 @@ public:
 
     // Serves until `stop` becomes true. Returns false if the port can't be opened.
     bool run(const std::atomic<bool>& stop);
+    void setWeather(WeatherFetcher* weather) { weather_ = weather; }
 
 private:
     struct Session {
@@ -58,6 +62,7 @@ private:
     std::string tilesRoot_;
     std::string recordingsDir_;  // empty: no recordings
     Recorder* recorder_;  // null: not recording
+    WeatherFetcher* weather_ = nullptr;  // null: no weather
     int port_;
     double rateHz_;
     std::atomic<int> streams_{0};

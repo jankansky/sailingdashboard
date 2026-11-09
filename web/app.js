@@ -123,6 +123,7 @@ function applySettings() {
   drawHistory();
   drawSpark();
   themeView3d();
+  themeWeather();
 }
 
 $('btn-damp').addEventListener('click', () => {
@@ -242,15 +243,20 @@ function themeView3d() {
   view3d.view.setTheme({ background: v('--panel'), water: v('--water'), ink: v('--ink') });
 }
 
-async function setView(mode3d) {
+// mode: '2d', '3d' or 'wx'
+async function setView(mode) {
+  if (!['2d', '3d', 'wx'].includes(mode)) mode = '2d';
+  const mode3d = mode === '3d';
   view3d.active = mode3d;
-  store.set('view', mode3d ? '3d' : '2d');
-  $('btn-2d').classList.toggle('active', !mode3d);
-  $('btn-3d').classList.toggle('active', mode3d);
+  store.set('view', mode);
+  for (const m of ['2d', '3d', 'wx']) $(`btn-${m}`).classList.toggle('active', m === mode);
   show($('btn-follow'), mode3d);
   showMapControls();
-  show($('rose'), !mode3d);
+  show($('rose'), mode === '2d');
   show($('boat3d'), mode3d);
+  show($('weather'), mode === 'wx');
+  document.querySelector('.rose-panel').classList.toggle('wx-mode', mode === 'wx');
+  setWeatherActive(mode === 'wx');
   if (!mode3d || view3d.view || view3d.loading) return;
   view3d.loading = true;
   try {
@@ -295,9 +301,43 @@ $('btn-map').addEventListener('click', () => {
   const options = [null, ...view3d.layers];
   setMapLayer(options[(options.indexOf(view3d.map) + 1) % options.length]);
 });
-$('btn-2d').addEventListener('click', () => setView(false));
-$('btn-3d').addEventListener('click', () => setView(true));
+$('btn-2d').addEventListener('click', () => setView('2d'));
+$('btn-3d').addEventListener('click', () => setView('3d'));
+$('btn-wx').addEventListener('click', () => setView('wx'));
 $('btn-follow').addEventListener('click', () => setFollow(!view3d.follow));
+
+// ------------------------------------------------------------ weather
+
+const weatherUi = { view: null, loading: false, active: false };
+
+function themeWeather() {
+  if (!weatherUi.view) return;
+  const css = getComputedStyle(document.documentElement);
+  const v = name => css.getPropertyValue(name).trim();
+  weatherUi.view.setTheme({ background: v('--panel'), water: v('--water'), land: v('--land'), ink: v('--ink') });
+}
+
+async function setWeatherActive(on) {
+  weatherUi.active = on;
+  if (weatherUi.view) return weatherUi.view.setActive(on);
+  if (!on || weatherUi.loading) return;
+  weatherUi.loading = true;
+  try {
+    const { createWeatherView } = await import('./weather.js');
+    weatherUi.view = createWeatherView($('weather'), {
+      boat: () => {
+        const n = latest?.nav;
+        return n && fin(n.lat) && fin(n.lon) ? { lat: n.lat, lon: n.lon, hdg: n.hdg } : null;
+      },
+    });
+    themeWeather();
+    weatherUi.view.setActive(weatherUi.active);
+  } catch (err) {
+    reportError('Weather view', err);
+  } finally {
+    weatherUi.loading = false;
+  }
+}
 
 // ------------------------------------------------------------ data
 
@@ -1129,7 +1169,7 @@ buildRose();
 buildHeelScale();
 applySettings();
 setFollow(view3d.follow);
-setView(store.get('view', '2d') === '3d');
+setView(store.get('view', '2d'));
 window.addEventListener('resize', drawHistory);
 refreshRecorder();
 resumeReplay().finally(() => {

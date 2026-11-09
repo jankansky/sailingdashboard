@@ -41,6 +41,7 @@ cmake --build build -j"$(nproc)"
 
 sudo install -d /opt/sailingdashboard/web
 sudo install -m 755 build/sailingdashboard /opt/sailingdashboard/
+sudo install -m 644 tools/fetch_weather.py /opt/sailingdashboard/
 sudo cp -r web/. /opt/sailingdashboard/web/
 if [ -d tiles ]; then  # offline map tiles from tools/fetch_tiles.py
     echo "Copying map tiles ($(du -sh tiles | cut -f1))..."

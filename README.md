@@ -207,9 +207,10 @@ Edit `/etc/default/sailingdashboard`, then `sudo systemctl restart sailingdashbo
 | `--imu-invert-roll` / `--imu-invert-pitch` | the BNO085's heel or pitch is reversed (affects only the IMU) |
 | `--roll-offset DEG` | heel reads non-zero at the dock |
 | `--heading-offset DEG` | heading sensor alignment error |
+| `--weather-home casco` | where to fetch weather for until GPS has a position: `casco`, `boston` or `LAT,LON` |
 
-The service always adds `--record /var/lib/sailingdashboard/recordings --set-clock`.
-Add `--no-record` to turn recording off.
+The service always adds `--record /var/lib/sailingdashboard/recordings --set-clock` and
+`--weather /var/lib/sailingdashboard/weather`. Add `--no-record` to turn recording off.
 
 ## The display
 
@@ -251,6 +252,19 @@ Add `--no-record` to turn recording off.
     1 nm in the next 30 min, and red within 0.5 nm in the next 20 min. A red line joins both boats'
     positions at the closest approach. The simulator includes four fictional AIS vessels.
   - It runs on Three.js, saved in `web/vendor/` so it works without internet.
+- **Weather**: tap **Wx** at the bottom of the main panel. It covers about 220 km around the boat.
+  - Drag the time slider left for the past 12 hours, as real images rather than analyses: GOES-East
+    **Visible** and **IR** satellite and the NEXRAD **Radar** mosaic, every 15 minutes.
+  - Drag it right for forecasts: **Wind** and **Gusts** (colour and barbs, kn), **Weather**
+    (precipitation, cloud and isobars) and **Waves** (height in ft, arrows for direction). The model
+    button switches between HRRR (2 days), GFS and ECMWF (about a week).
+  - ▶ loops through the past images or the forecast hours.
+  - The Pi fetches new weather every 15 minutes when it has internet (forecasts every 3 hours) and
+    keeps the last fetch, so it can still be viewed offline on the water. ↻ fetches now. The
+    status line says how old it is.
+  - Sources: NOAA nowCOAST (satellite and radar; it keeps about 8 hours, so the full 12 build up
+    while the Pi is online), Open-Meteo (forecasts; free for non-commercial use), NASA GIBS (basemap).
+    Not for navigation.
 - **Header**: status pills turn amber or red when a sensor goes quiet. **Damp** sets the smoothing. **Day/Dusk/Night** switches themes (Night is red-only).
 - **Screenshot** (camera button): saves a PNG of the whole dashboard, including the 3D view, to the
   tablet's downloads. It's named after the boat and the time shown, e.g. `potter19-2026-07-04-143210.png`.
@@ -292,7 +306,9 @@ cmake -S . -B build && cmake --build build
 open http://localhost:8080/
 ```
 
-Add `--record recordings` to record the simulator and try the Logs button. Use
+Add `--record recordings` to record the simulator and try the Logs button. Add
+`--weather weather` to fetch weather around the simulated boat for the Wx view.
+`python3 tools/fetch_weather.py --out weather --at 43.76,-70.16` fetches it on its own. Use
 `--recordings DIR` to replay recordings copied from the Pi without recording, e.g.
 `scp -r pi@sailboat.local:/var/lib/sailingdashboard/recordings .`.
 
@@ -328,5 +344,8 @@ web/sky.js, astro.js sky, sun and moon (skymodel.js: Three.js's Preetham sky sha
 web/screenshot.js    redraws the page into an image for the screenshot button
 web/boats.js         boat catalog: dimensions → hull lines, rig, layout; 2D plan and stern views
 tools/fetch_tiles.py downloads imagery and NOAA chart tiles for offline use
+tools/fetch_weather.py satellite, radar and forecasts around the boat (run by the server)
+src/weather.*        runs fetch_weather.py every 15 minutes
+web/weather.js       the Wx view
 deploy/              installer, push-to-Pi script, udev rule, systemd service
 ```

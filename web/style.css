@@ -17,6 +17,7 @@
   --sail: rgba(31, 99, 201, 0.10);
   --sail-stroke: #26394d;
   --water: #cfe2f2;
+  --land: #ebe6d6;
   --ok: #138a43;
   --warn: #c98a00;
   --bad: #d62828;
@@ -41,6 +42,7 @@
   --sail: rgba(90, 162, 255, 0.14);
   --sail-stroke: #b7c6d6;
   --water: #0d2a45;
+  --land: #1f2a37;
   --ok: #35d07f;
   --warn: #ffc233;
   --bad: #ff5a5a;
@@ -66,6 +68,7 @@
   --sail: rgba(255, 59, 47, 0.08);
   --sail-stroke: #a3241b;
   --water: #1a0302;
+  --land: #0d0101;
   --ok: #a3241b;
   --warn: #ff3b2f;
   --bad: #ff3b2f;
@@ -226,6 +229,42 @@ main {
 .boat3d canvas { width: 100%; height: 100%; display: block; }
 :root[data-theme="night"] .boat3d canvas { filter: grayscale(1) sepia(1) saturate(6) hue-rotate(-50deg) brightness(0.55); }
 .boat3d-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+
+/* ---------- weather ---------- */
+
+.weather { position: absolute; inset: 0; border-radius: 14px; overflow: hidden; }
+.rose-panel.wx-mode .corner { display: none; }
+.wx { position: absolute; inset: 0; }
+.wx-map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+:root[data-theme="night"] .wx-map { filter: grayscale(1) sepia(1) saturate(6) hue-rotate(-50deg) brightness(0.55); }
+.wx-top { position: absolute; z-index: 2; top: 8px; left: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.wx-seg { display: flex; gap: 2px; }
+.wx-top button { min-height: 34px; padding: 4px 10px; font-size: 14px; }
+.wx-top button.active { background: var(--ink); color: var(--panel); }
+.wx-model.dim { opacity: 0.6; }
+.wx-info, .wx-legend, .wx-status, .wx-msg {
+  position: absolute; z-index: 2; background: var(--panel); border-radius: 8px; padding: 4px 8px;
+}
+.wx-info { top: 50px; left: 8px; opacity: 0.9; pointer-events: none; }
+.wx-time { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.wx-sub { font-size: 12px; color: var(--muted); }
+.wx-legend { top: 50px; right: 8px; width: min(260px, 45%); opacity: 0.9; font-size: 11px; color: var(--muted); pointer-events: none; }
+.wx-legend-bar { height: 10px; border-radius: 3px; margin: 3px 0 2px; }
+.wx-legend-labels { position: relative; height: 13px; }
+.wx-legend-labels span { position: absolute; transform: translateX(-50%); font-variant-numeric: tabular-nums; }
+.wx-legend-labels span.first { transform: none; }
+.wx-legend-labels span.last { transform: translateX(-100%); }
+.wx-legend-labels .wx-legend-unit { position: static; transform: none; float: right; margin-top: 13px; }
+.wx-msg { top: 45%; left: 50%; transform: translate(-50%, -50%); max-width: 80%; text-align: center; color: var(--muted); }
+.wx-bar { position: absolute; z-index: 2; left: 8px; right: 8px; bottom: 74px; display: flex; gap: 8px; align-items: center; }
+.wx-track { position: relative; flex: 1; padding-bottom: 14px; }
+.wx-slider { width: 100%; margin: 0; }
+.wx-ticks { position: absolute; left: 0; right: 0; bottom: 0; height: 14px; font-size: 11px; color: var(--muted); pointer-events: none; }
+.wx-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; background: var(--panel); padding: 0 2px; border-radius: 3px; }
+.wx-ticks span.now { color: var(--ink); font-weight: 700; }
+.wx-status { left: 8px; right: 8px; bottom: 52px; font-size: 11px; color: var(--muted); background: none; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; padding: 0; }
+.wx-status.stale { color: var(--warn); }
 
 .error-banner {
   display: flex;

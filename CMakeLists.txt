@@ -20,6 +20,7 @@ add_executable(sailingdashboard
         src/serial_port.cpp
         src/recorder.cpp
         src/playback.cpp
-        src/clock_sync.cpp)
+        src/clock_sync.cpp
+        src/weather.cpp)
 target_compile_options(sailingdashboard PRIVATE -Wall -Wextra)
 target_link_libraries(sailingdashboard PRIVATE Threads::Threads)

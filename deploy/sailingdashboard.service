@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 EnvironmentFile=-/etc/default/sailingdashboard
-ExecStart=/opt/sailingdashboard/sailingdashboard --web /opt/sailingdashboard/web --tiles /opt/sailingdashboard/tiles --record /var/lib/sailingdashboard/recordings --set-clock $DASH_ARGS
+ExecStart=/opt/sailingdashboard/sailingdashboard --web /opt/sailingdashboard/web --tiles /opt/sailingdashboard/tiles --record /var/lib/sailingdashboard/recordings --set-clock --weather /var/lib/sailingdashboard/weather --weather-fetcher /opt/sailingdashboard/fetch_weather.py $DASH_ARGS
 DynamicUser=yes
-# Recordings of the bus live in /var/lib/sailingdashboard (kept across restarts and updates).
+# Recordings of the bus and fetched weather live in /var/lib/sailingdashboard (kept across restarts and updates).
 StateDirectory=sailingdashboard
 SupplementaryGroups=dialout
 # Port 80, and setting the clock from GPS.

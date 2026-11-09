@@ -8,6 +8,8 @@
 # Logging: the bus is recorded to /var/lib/sailingdashboard/recordings (Logs button on the tablet).
 #          --record-max-gb 4   keep at most 4 GB of recordings (default 8; oldest deleted first)
 #          --no-record         turn recording off
+# Weather: --weather-home casco   area to fetch weather for before GPS has a position
+#          (casco, boston or LAT,LON); after that it follows the boat
 # Tuning:  --variation -14.3   only needed if no device on the bus sends variation
 #          --invert-roll       if heel shows on the wrong side
 #          --heading-offset 2  if heading reads 2 degrees low

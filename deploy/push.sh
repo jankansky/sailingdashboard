@@ -26,7 +26,7 @@ done
 dest=sailingdashboard  # in the Pi user's home directory
 rsync -az --delete --stats \
     --exclude 'build/' --exclude 'cmake-build-*/' --exclude '.idea/' \
-    --exclude 'tiles/' --exclude 'tiles_cache/' --exclude 'recordings/' --exclude '.DS_Store' \
+    --exclude 'tiles/' --exclude 'tiles_cache/' --exclude 'recordings/' --exclude 'weather/' --exclude '.DS_Store' \
     ./ "$host:$dest/"
 if [ "$tiles" = 1 ] && [ -d tiles ]; then
     echo "Sending map tiles ($(du -sh tiles | cut -f1))..."
@@ -41,6 +41,7 @@ else
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Release >/dev/null
         cmake --build build -j\$(nproc)
         sudo install -m 755 build/sailingdashboard /opt/sailingdashboard/
+        sudo install -m 644 tools/fetch_weather.py /opt/sailingdashboard/
         sudo rsync -a --delete web/ /opt/sailingdashboard/web/
         sudo install -m 644 deploy/sailingdashboard.service /etc/systemd/system/
         sudo systemctl daemon-reload

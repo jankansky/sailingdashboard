@@ -191,7 +191,8 @@ void HttpServer::handleConnection(int fd, const std::atomic<bool>& stop) {
     std::string method, target;
     line >> method >> target;
     std::string path = target.substr(0, target.find('?'));
-    bool control = path.rfind("/api/playback/", 0) == 0 && path != "/api/playback/status";
+    bool control = (path.rfind("/api/playback/", 0) == 0 && path != "/api/playback/status") ||
+                   path == "/api/weather/refresh";
     if (control ? method != "POST" : method != "GET" && method != "HEAD") {
         respond(fd, 405, "Method Not Allowed", "text/plain", control ? "POST only\n" : "GET only\n");
         return;
@@ -209,6 +210,13 @@ void HttpServer::handleConnection(int fd, const std::atomic<bool>& stop) {
         return;
     }
     if (path.rfind("/recordings/", 0) == 0) return serveRecording(fd, path.substr(12));
+    if (path == "/api/weather/refresh" && weather_) weather_->requestNow();
+    if (path == "/api/weather" || path == "/api/weather/refresh") {
+        std::string body = "{\"enabled\":" + std::string(weather_ ? "true" : "false") +
+                           ",\"running\":" + (weather_ && weather_->running() ? "true" : "false") + "}";
+        respond(fd, 200, "OK", "application/json", body);
+        return;
+    }
 
     // Data calls answer for a replay session if one is named, else for the live boat.
     BoatState* st = &state_;
@@ -406,17 +414,22 @@ void HttpServer::serveFile(int fd, const std::string& path, const std::string& i
         return;
     }
     bool tile = path.rfind("/tiles/", 0) == 0;
-    std::string file = tile ? tilesRoot_ + path.substr(6) : webRoot_ + path;
+    bool weather = path.rfind("/weather/", 0) == 0;
+    if (weather && !weather_) {
+        respond(fd, 404, "Not Found", "text/plain", "weather is off\n");
+        return;
+    }
+    std::string file = tile ? tilesRoot_ + path.substr(6) : weather ? weather_->dir() + path.substr(8) : webRoot_ + path;
     struct stat st{};
     std::ifstream in(file, std::ios::binary);
     if (!in || stat(file.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
         respond(fd, 404, "Not Found", "text/plain", "not found\n");
         return;
     }
-    // Map tiles never change, so tablets may keep them. Everything else is
-    // revalidated on each load (cheap: unchanged files get a bodiless 304), so
-    // edits to the page always show up.
-    if (tile && path != "/tiles/index.json") {
+    // Map tiles and weather images never change (new ones get new names), so
+    // tablets may keep them. Everything else is revalidated on each load (cheap:
+    // unchanged files get a bodiless 304), so edits to the page always show up.
+    if ((tile || weather) && path.size() > 11 && path.compare(path.size() - 11, 11, "/index.json") != 0) {
         std::ostringstream body;
         body << in.rdbuf();
         respond(fd, 200, "OK", contentType(path), body.str(), "max-age=604800");

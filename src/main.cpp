@@ -18,6 +18,7 @@
 #include "imu_rvc.hpp"
 #include "n2k.hpp"
 #include "recorder.hpp"
+#include "weather.hpp"
 
 namespace {
 
@@ -50,6 +51,11 @@ void usage(const char* argv0) {
         "  --record-max-gb N    delete the oldest recordings beyond N GB (default 8)\n"
         "  --recordings DIR     offer recordings in DIR for replay without recording\n"
         "  --set-clock          set the Pi's clock from GPS time (the service does this)\n"
+        "  --weather DIR        fetch satellite, radar and forecasts around the boat into DIR\n"
+        "                       every 15 minutes, for the Weather view (needs internet then)\n"
+        "  --weather-fetcher F  the fetch script (default tools/fetch_weather.py)\n"
+        "  --weather-home WHERE where to fetch for before GPS has a position:\n"
+        "                       boston, casco or LAT,LON\n"
         "  --no-record          turn off a --record given earlier (e.g. in the service file)\n"
         "  --verbose            print every decoded message\n",
         argv0);
@@ -95,6 +101,7 @@ int main(int argc, char** argv) {
     double recordMaxGb = 8;
     bool noRecord = false;
     bool setClock = false;
+    std::string weatherDir, weatherFetcher = "tools/fetch_weather.py", weatherHome;
     bool sim = false;
     double simLat = 42.3355, simLon = -70.9920;  // Boston outer harbor
     BoatState state;
@@ -139,6 +146,13 @@ int main(int argc, char** argv) {
         else if (a == "--recordings") recordingsDir = next();
         else if (a == "--no-record") noRecord = true;
         else if (a == "--set-clock") setClock = true;
+        else if (a == "--weather") weatherDir = next();
+        else if (a == "--weather-fetcher") weatherFetcher = next();
+        else if (a == "--weather-home") {
+            weatherHome = next();
+            if (weatherHome == "boston") weatherHome = "42.3355,-70.9920";
+            else if (weatherHome == "casco") weatherHome = "43.6420,-70.2050";
+        }
         else if (a == "--verbose") verbose = true;
         else {
             usage(argv[0]);
@@ -195,6 +209,13 @@ int main(int argc, char** argv) {
     });
 
     HttpServer server(state, webRoot, tilesRoot, recordingsDir, recorder.get(), port, rate);
+    std::unique_ptr<WeatherFetcher> weather;
+    if (!weatherDir.empty()) {
+        while (weatherDir.size() > 1 && weatherDir.back() == '/') weatherDir.pop_back();
+        weather = std::make_unique<WeatherFetcher>(weatherDir, weatherFetcher, weatherHome, port);
+        server.setWeather(weather.get());
+        weather->start();
+    }
     bool ok = server.run(g_stop);
     g_stop = true;
     reader.join();
