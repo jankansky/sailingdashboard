@@ -30,6 +30,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -71,10 +72,24 @@ def log(*a):
     print("weather:", *a, flush=True)
 
 
-def get(url, timeout=60):
+RETRY_WAITS = (5, 20)  # seconds before the 2nd and 3rd tries
+
+
+def get(url, timeout=60, waits=RETRY_WAITS):
+    """Downloads url. Retries server hiccups: nowCOAST answers 502 Bad Gateway
+    now and then for a few seconds."""
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    for wait in (*waits, None):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            if wait is None or not (e.code == 429 or e.code >= 500):
+                raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if wait is None:
+                raise
+        time.sleep(wait)
 
 
 def write_atomic(path, data):
@@ -112,7 +127,7 @@ def boat_position(args, previous):
         return lat, lon
     if args.state:
         try:
-            nav = json.loads(get(args.state, timeout=5)).get("nav", {})
+            nav = json.loads(get(args.state, timeout=5, waits=())).get("nav", {})
             if nav.get("lat") is not None and nav.get("lon") is not None:
                 return nav["lat"], nav["lon"]
         except Exception as e:
@@ -146,9 +161,14 @@ def wms_url(base, layer, bbox, fmt, time_iso=None, transparent=False, version="1
     return base + "?" + urllib.parse.urlencode(q)
 
 
+_capabilities = {}
+
+
 def layer_times(workspace, layer):
     """Times nowCOAST has for a layer, as unix seconds."""
-    xml = get("%s/%s/wms?SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.3.0" % (NOWCOAST, workspace))
+    if workspace not in _capabilities:  # vis and ir share one
+        _capabilities[workspace] = get("%s/%s/wms?SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.3.0" % (NOWCOAST, workspace))
+    xml = _capabilities[workspace]
     ns = {"w": "http://www.opengis.net/wms"}
     for el in ET.fromstring(xml).iter("{http://www.opengis.net/wms}Layer"):
         name = el.find("w:Name", ns)
