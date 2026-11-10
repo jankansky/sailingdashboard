@@ -731,10 +731,14 @@ export function createWeatherView(container, opts) {
           }));
           setLegend(state.future === 'wind' ? '10 m wind (barbs: kn)' : '10 m gusts', KN_STOPS, 'kn');
         } else if (state.future === 'wx') {
-          paintField(v.cloud[ti], I, 1, c => (c < 5 ? null : [235, 238, 242, c / 100 * 0.6]), 0.6, L);
+          // Clouds contrast with the map: grey on the light day map, white on the dark ones.
+          const [wr, wg, wb] = hexRgb(state.theme.water);
+          const light = 0.3 * wr + 0.59 * wg + 0.11 * wb > 128;
+          const cloud = light ? [96, 104, 116] : [228, 232, 238];
+          paintField(v.cloud[ti], I, 1, c => (c < 5 ? null : [...cloud, 0.2 + 0.6 * c / 100]), 0.8, L);
           paintField(v.precip[ti], I, MM_IN, r => (r < 0.005 ? null : SCALES.rain(r)), 0.85, L);
           isobars(v.pmsl[ti], data, L);
-          setLegend('Precipitation · clouds (white) · isobars every 2 mb', RAIN_STOPS, 'in/h');
+          setLegend(`Precipitation · clouds (${light ? 'grey' : 'white'}) · isobars every 2 mb`, RAIN_STOPS, 'in/h');
         } else {
           paintField(v.wave[ti], I, FT, SCALES.ft, 0.85, L);
           if (B) ctx.drawImage(B.landOnly, L.left, L.top, L.size, L.size);
